@@ -40,12 +40,20 @@
 </div>
 
 <% if (logs.length > 0) { %>
+<!-- Bulk actions bar (hidden until checkboxes selected) -->
+<div id="bulkBar" class="bulk-actions-bar" style="display:none;">
+    <span id="selectedCount">0</span> selected &mdash;
+    <button type="button" class="btn btn-primary btn-sm" onclick="bulkResend()">&#8635; Resend Selected</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="clearSelection()">Clear Selection</button>
+</div>
+
 <div class="card">
     <div class="card-body" style="padding: 0;">
         <div class="table-container">
             <table>
                 <thead>
                     <tr>
+                        <th style="width:36px;"><input type="checkbox" id="selectAll" title="Select all"></th>
                         <th>Date</th>
                         <th>Publication</th>
                         <th>Type</th>
@@ -60,6 +68,7 @@
                 <tbody>
                     <% logs.forEach(function(log) { %>
                     <tr>
+                        <td><input type="checkbox" class="log-checkbox" value="<%= log.id %>" data-pub="<%= log.publication_number %>"></td>
                         <td style="white-space: nowrap;"><%= new Date(log.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %><br><span class="text-muted"><%= new Date(log.sent_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) %></span></td>
                         <td><strong><%= log.publication_number %></strong><br><span class="text-muted"><%= log.publication_title %></span></td>
                         <td><%= log.content_type %></td>
@@ -74,7 +83,7 @@
                         <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
                         <td class="actions">
                             <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
-                                <button type="submit" class="btn btn-secondary btn-sm" title="Resend">&#8635; Resend</button>
+                                <button type="submit" class="btn btn-secondary btn-sm" title="Resend">&#8635;</button>
                             </form>
                         </td>
                     </tr>
@@ -132,6 +141,64 @@ function startAutoRefresh() {
 }
 function stopAutoRefresh() {
     if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+}
+
+// Checkbox selection & bulk resend
+var selectAllCheckbox = document.getElementById('selectAll');
+var checkboxes = document.querySelectorAll('.log-checkbox');
+var bulkBar = document.getElementById('bulkBar');
+var selectedCountEl = document.getElementById('selectedCount');
+
+function updateBulkBar() {
+    var checked = document.querySelectorAll('.log-checkbox:checked');
+    if (checked.length > 0) {
+        bulkBar.style.display = 'flex';
+        selectedCountEl.textContent = checked.length;
+    } else {
+        bulkBar.style.display = 'none';
+    }
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = checked.length === checkboxes.length && checkboxes.length > 0;
+    }
+}
+
+if (selectAllCheckbox) {
+    selectAllCheckbox.addEventListener('change', function() {
+        checkboxes.forEach(function(cb) { cb.checked = selectAllCheckbox.checked; });
+        updateBulkBar();
+    });
+}
+
+checkboxes.forEach(function(cb) {
+    cb.addEventListener('change', updateBulkBar);
+});
+
+function clearSelection() {
+    checkboxes.forEach(function(cb) { cb.checked = false; });
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    updateBulkBar();
+}
+
+function bulkResend() {
+    var checked = document.querySelectorAll('.log-checkbox:checked');
+    var ids = [];
+    checked.forEach(function(cb) { ids.push(parseInt(cb.value)); });
+    if (ids.length === 0) return;
+
+    if (!confirm('Resend ' + ids.length + ' notification(s)?')) return;
+
+    fetch('/logs/resend-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: ids })
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.success) {
+            location.href = '/logs?success=' + encodeURIComponent('Resent ' + data.count + ' notification(s) successfully');
+        } else {
+            location.href = '/logs?error=' + encodeURIComponent(data.error || 'Bulk resend failed');
+        }
+    });
 }
 </script>
 

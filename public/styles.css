@@ -591,6 +591,21 @@ td.actions { white-space: nowrap; text-align: right; }
 }
 .auto-refresh-toggle input[type="checkbox"] { cursor: pointer; }
 
+/* Bulk actions bar */
+.bulk-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--primary-50);
+  border: 1px solid var(--primary-100);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
 /* ============================================================
    Dashboard Grid
    ============================================================ */

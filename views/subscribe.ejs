@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subscribe - PSI Publication Notifications</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body style="background: var(--gray-50);">
+
+<div style="max-width: 800px; margin: 0 auto; padding: 32px 20px;">
+
+    <!-- Header -->
+    <div style="text-align: center; margin-bottom: 32px;">
+        <img src="/images/psi-logo.svg" alt="PSI" style="height: 48px; margin-bottom: 12px;">
+        <h1 style="font-size: 24px; font-weight: 700; color: var(--gray-900); margin: 0 0 8px;">Subscribe to Publication Notifications</h1>
+        <p style="font-size: 14px; color: var(--gray-500); margin: 0;">Receive service bulletins, safety notices, and product alerts from Power Solutions International.</p>
+    </div>
+
+    <% if (success) { %>
+    <div style="background: var(--success-light); color: #155724; padding: 16px 20px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; font-weight: 600; text-align: center;">
+        <%= success %>
+    </div>
+    <% } %>
+    <% if (error) { %>
+    <div style="background: var(--danger-light); color: #721c24; padding: 16px 20px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; font-weight: 600; text-align: center;">
+        <%= error %>
+    </div>
+    <% } %>
+
+    <% if (!success) { %>
+    <form action="/subscribe" method="POST">
+    <div class="form-container">
+
+        <!-- Contact Info -->
+        <div class="form-section">
+            <div class="form-section-title">Your Information</div>
+            <div class="form-section-desc">Tell us who you are so we can set up your notification profile</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="required">Full Name</label>
+                    <input type="text" name="contact_name" required placeholder="John Smith">
+                </div>
+                <div class="form-group">
+                    <label class="required">Company</label>
+                    <input type="text" name="company" required placeholder="Your company name">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="required">Email</label>
+                    <input type="email" name="email" required placeholder="you@company.com">
+                </div>
+                <div class="form-group">
+                    <label>CC Emails</label>
+                    <input type="text" name="cc_emails" placeholder="additional@email.com">
+                    <div class="help-text">Additional notification emails, comma-separated</div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Customer Type</label>
+                    <select name="customer_type">
+                        <option value="OEM">OEM</option>
+                        <option value="Distributor">Distributor</option>
+                        <option value="Dealer">Dealer</option>
+                        <option value="End User" selected>End User</option>
+                        <option value="Internal">Internal</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Subscription Tier</label>
+                    <select name="subscription_tier">
+                        <option value="Essential">Essential &mdash; Critical/Safety only</option>
+                        <option value="Standard">Standard &mdash; High + Standard priority</option>
+                        <option value="All Announcements" selected>All Announcements &mdash; Everything</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Products -->
+        <div class="form-section">
+            <div class="form-section-title">Notification Preferences</div>
+            <div class="form-section-desc">Select the products, markets, content types, and regions you want to receive notifications for</div>
+
+            <div class="form-group">
+                <div class="checkbox-group-header">
+                    <label>Products</label>
+                    <a href="#" class="select-all-toggle" data-group="products">Select All</a>
+                </div>
+                <div class="checkbox-grid">
+                    <% metadata.products.forEach(function(product) { %>
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="products" value="<%= product %>">
+                        <span class="checkbox-label"><%= product %></span>
+                    </label>
+                    <% }); %>
+                </div>
+            </div>
+
+            <div class="form-group mt-3">
+                <div class="checkbox-group-header">
+                    <label>Markets</label>
+                    <a href="#" class="select-all-toggle" data-group="markets">Select All</a>
+                </div>
+                <div class="checkbox-grid">
+                    <% metadata.markets.forEach(function(market) { %>
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="markets" value="<%= market %>">
+                        <span class="checkbox-label"><%= market %></span>
+                    </label>
+                    <% }); %>
+                </div>
+            </div>
+
+            <div class="form-group mt-3">
+                <div class="checkbox-group-header">
+                    <label>Content Types</label>
+                    <a href="#" class="select-all-toggle" data-group="content_types">Select All</a>
+                </div>
+                <div class="checkbox-grid">
+                    <% metadata.content_types.forEach(function(ct) { %>
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="content_types" value="<%= ct %>">
+                        <span class="checkbox-label"><%= ct %></span>
+                    </label>
+                    <% }); %>
+                </div>
+            </div>
+
+            <div class="form-group mt-3">
+                <div class="checkbox-group-header">
+                    <label>Regions</label>
+                    <a href="#" class="select-all-toggle" data-group="regions">Select All</a>
+                </div>
+                <div class="checkbox-grid">
+                    <% metadata.regions.forEach(function(region) { %>
+                    <label class="checkbox-card">
+                        <input type="checkbox" name="regions" value="<%= region %>">
+                        <span class="checkbox-label"><%= region %></span>
+                    </label>
+                    <% }); %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Submit -->
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-lg">Subscribe to Notifications</button>
+        </div>
+    </div>
+    </form>
+    <% } %>
+
+    <div style="text-align: center; margin-top: 24px; font-size: 12px; color: var(--gray-400);">
+        &copy; <%= new Date().getFullYear() %> Power Solutions International. All rights reserved.
+    </div>
+</div>
+
+<script>
+// Select All / Deselect All toggles
+document.querySelectorAll('.select-all-toggle').forEach(function(toggle) {
+    toggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        var group = this.dataset.group;
+        var checkboxes = document.querySelectorAll('input[name="' + group + '"]');
+        var allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
+        checkboxes.forEach(function(cb) { cb.checked = !allChecked; });
+        this.textContent = allChecked ? 'Select All' : 'Deselect All';
+    });
+});
+
+// "All" option logic
+function setupAllToggle(allValue, groupName) {
+    var allCheckbox = document.querySelector('input[name="' + groupName + '"][value="' + allValue + '"]');
+    if (!allCheckbox) return;
+    var others = document.querySelectorAll('input[name="' + groupName + '"]:not([value="' + allValue + '"])');
+
+    allCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            others.forEach(function(cb) { cb.checked = false; cb.closest('.checkbox-card').classList.add('disabled'); });
+        } else {
+            others.forEach(function(cb) { cb.closest('.checkbox-card').classList.remove('disabled'); });
+        }
+    });
+
+    others.forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            if (this.checked) {
+                allCheckbox.checked = false;
+                others.forEach(function(o) { o.closest('.checkbox-card').classList.remove('disabled'); });
+            }
+        });
+    });
+}
+
+setupAllToggle('All Products', 'products');
+setupAllToggle('All Markets', 'markets');
+setupAllToggle('All Content Types', 'content_types');
+setupAllToggle('Global', 'regions');
+</script>
+
+</body>
+</html>

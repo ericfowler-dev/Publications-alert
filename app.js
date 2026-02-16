@@ -568,7 +568,7 @@ function sendEmail(publication, customer) {
     to: customer.email,
     cc: customer.cc_emails || undefined,
     subject: subject,
-    html: generateEmailHTML(publication)
+    html: generateEmailHTML(publication, customer.email)
   };
 
   // Attach the document if a file exists
@@ -594,10 +594,16 @@ function sendEmail(publication, customer) {
 }
 
 // Generate email HTML
-function generateEmailHTML(publication) {
+function generateEmailHTML(publication, customerEmail) {
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
   const releaseDate = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const products = publication.products ? publication.products.replace(/;/g, ', ') : '';
   const fileName = publication.file_name || '';
+  const unsubscribeUrl = `${baseUrl}/unsubscribe?email=${encodeURIComponent(customerEmail || '')}`;
+
+  // Build structured "Applies To" lines
+  const productsList = publication.products ? publication.products.split(';').map(p => p.trim()).filter(Boolean) : [];
+  const marketsList = publication.markets ? publication.markets.split(';').map(m => m.trim()).filter(Boolean) : [];
+  const regionsList = publication.regions ? publication.regions.split(';').map(r => r.trim()).filter(Boolean) : [];
 
   const actionBlock = publication.action_required ? `
                 <div style="border-left:4px solid #e67700; background-color:#fff7e6; padding:12px 14px; margin:0 0 16px 0;">
@@ -642,12 +648,16 @@ function generateEmailHTML(publication) {
                   <strong>Release Date:</strong> ${releaseDate}<br>
                   <strong>Priority:</strong> ${publication.urgency}
                 </div>
-                <div style="border:1px solid #e6e8eb; background-color:#fbfbfc; border-radius:8px; padding:14px; margin:0 0 16px 0;">
-                  <div style="font-size:13px; color:#444; line-height:1.55;">
-                    <strong>Applies To</strong><br>
-                    ${products}${publication.markets ? ' &mdash; ' + publication.markets.replace(/;/g, ', ') : ''}
-                  </div>
-                </div>
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border:1px solid #e6e8eb; background-color:#fbfbfc; border-radius:8px; border-collapse:collapse; margin:0 0 16px 0;">
+                  <tr>
+                    <td style="padding:14px; font-family:Arial, sans-serif;">
+                      <div style="font-size:13px; font-weight:700; color:#222; margin:0 0 8px 0;">Applies To</div>
+                      ${productsList.length ? '<div style="font-size:13px; color:#444; line-height:1.55; margin:0 0 4px 0;"><strong>Products:</strong> ' + productsList.join(', ') + '</div>' : ''}
+                      ${marketsList.length ? '<div style="font-size:13px; color:#444; line-height:1.55; margin:0 0 4px 0;"><strong>Markets:</strong> ' + marketsList.join(', ') + '</div>' : ''}
+                      ${regionsList.length ? '<div style="font-size:13px; color:#444; line-height:1.55; margin:0;"><strong>Regions:</strong> ' + regionsList.join(', ') + '</div>' : ''}
+                    </td>
+                  </tr>
+                </table>
                 ${publication.summary ? `<div style="font-size:14px; line-height:1.65; margin:0 0 12px 0;">
                   <strong>Summary</strong><br>
                   ${publication.summary}
@@ -667,7 +677,8 @@ function generateEmailHTML(publication) {
             <tr>
               <td style="padding:16px 22px; background-color:#f3f4f6; font-family:Arial, sans-serif; color:#666; font-size:11px; line-height:1.5;">
                 You received this notification based on your PSI distribution profile.<br>
-                &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.
+                &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.<br>
+                <a href="${unsubscribeUrl}" style="color:#888; text-decoration:underline;">Unsubscribe</a> from future notifications.
               </td>
             </tr>
           </table>
@@ -745,6 +756,39 @@ app.post('/logs/:id/resend', async (req, res) => {
   } catch (err) {
     console.error('Resend error:', err);
     res.redirect('/logs?error=' + encodeURIComponent('Error resending notification'));
+  }
+});
+
+// Bulk resend multiple log entries
+app.post('/logs/resend-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'No log entries selected' });
+    }
+
+    let count = 0;
+    for (const id of ids) {
+      const logEntry = await dbGet('SELECT * FROM distribution_logs WHERE id = ?', [id]);
+      if (!logEntry) continue;
+
+      const publication = await dbGet('SELECT * FROM publications WHERE publication_number = ?', [logEntry.publication_number]);
+      const customer = await dbGet('SELECT * FROM customers WHERE email = ? AND company = ?', [logEntry.recipient_email, logEntry.recipient_company]);
+
+      if (!publication || !customer) continue;
+
+      sendEmail(publication, customer);
+
+      await dbRun(`INSERT INTO distribution_logs (publication_number, publication_title, content_type, urgency, recipient_name, recipient_company, recipient_email, delivery_status, match_reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'Resent', ?)`,
+        [logEntry.publication_number, logEntry.publication_title, logEntry.content_type, logEntry.urgency, logEntry.recipient_name, logEntry.recipient_company, logEntry.recipient_email, 'Bulk resend']);
+      count++;
+    }
+
+    res.json({ success: true, count });
+  } catch (err) {
+    console.error('Bulk resend error:', err);
+    res.status(500).json({ error: 'Bulk resend failed' });
   }
 });
 
@@ -869,6 +913,126 @@ app.post('/settings/metadata/:id/edit', async (req, res) => {
   } catch (err) {
     console.error('Edit metadata error:', err);
     res.redirect('/settings?error=' + encodeURIComponent('Error editing metadata'));
+  }
+});
+
+// ============================================================
+// UNSUBSCRIBE
+// ============================================================
+
+app.get('/unsubscribe', async (req, res) => {
+  const email = req.query.email || '';
+  let message = '';
+  let done = false;
+
+  if (req.query.confirmed === 'true' && email) {
+    try {
+      const customer = await dbGet('SELECT * FROM customers WHERE email = ?', [email]);
+      if (customer) {
+        await dbRun("UPDATE customers SET status = 'Inactive' WHERE email = ?", [email]);
+        message = 'You have been unsubscribed. You will no longer receive publication notifications.';
+        done = true;
+      } else {
+        message = 'Email address not found in our system.';
+      }
+    } catch (err) {
+      console.error('Unsubscribe error:', err);
+      message = 'An error occurred. Please contact support.';
+    }
+  }
+
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unsubscribe - PSI Publications</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f6f7f9; margin: 0; padding: 40px 20px; color: #222; }
+    .container { max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; border: 1px solid #e6e8eb; padding: 40px; text-align: center; }
+    h1 { font-size: 20px; color: #43A047; margin: 0 0 12px; }
+    p { font-size: 14px; line-height: 1.6; color: #444; }
+    .btn { display: inline-block; padding: 10px 24px; border-radius: 6px; font-size: 14px; font-weight: 600; text-decoration: none; margin: 8px 4px; cursor: pointer; border: none; }
+    .btn-danger { background: #dc3545; color: #fff; }
+    .btn-secondary { background: #e2e4e8; color: #444; }
+    .footer { margin-top: 20px; font-size: 11px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>PSI Publication Notifications</h1>
+    ${done || message ? `<p>${message}</p>` : `
+      <p>You are requesting to unsubscribe <strong>${email}</strong> from PSI publication notifications.</p>
+      <p>Are you sure? You will no longer receive service bulletins, safety notices, or other publication alerts.</p>
+      <a href="/unsubscribe?email=${encodeURIComponent(email)}&confirmed=true" class="btn btn-danger">Yes, Unsubscribe</a>
+      <a href="javascript:window.close()" class="btn btn-secondary">Cancel</a>
+    `}
+    <div class="footer">&copy; ${new Date().getFullYear()} Power Solutions International</div>
+  </div>
+</body>
+</html>`);
+});
+
+// ============================================================
+// CUSTOMER SELF-SERVICE PORTAL
+// ============================================================
+
+app.get('/subscribe', async (req, res) => {
+  try {
+    const metadata = await getMetadata();
+    res.render('subscribe', {
+      metadata,
+      success: req.query.success || '',
+      error: req.query.error || ''
+    });
+  } catch (err) {
+    console.error('Subscribe page error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+app.post('/subscribe', async (req, res) => {
+  try {
+    const { contact_name, company, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier } = req.body;
+
+    if (!contact_name || !company || !email) {
+      return res.redirect('/subscribe?error=' + encodeURIComponent('Name, company, and email are required'));
+    }
+
+    // Check for existing subscription
+    const existing = await dbGet('SELECT * FROM customers WHERE email = ?', [email]);
+    if (existing) {
+      if (existing.status === 'Inactive') {
+        // Reactivate
+        await dbRun("UPDATE customers SET status = 'Active', contact_name = ?, company = ?, products = ?, markets = ?, content_types = ?, regions = ?, customer_type = ?, subscription_tier = ?, cc_emails = ? WHERE id = ?",
+          [contact_name, company,
+           Array.isArray(products) ? products.join('; ') : (products || ''),
+           Array.isArray(markets) ? markets.join('; ') : (markets || ''),
+           Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
+           Array.isArray(regions) ? regions.join('; ') : (regions || ''),
+           customer_type || 'End User', subscription_tier || 'All Announcements', cc_emails || '', existing.id]);
+        return res.redirect('/subscribe?success=' + encodeURIComponent('Welcome back! Your subscription has been reactivated.'));
+      }
+      return res.redirect('/subscribe?error=' + encodeURIComponent('This email is already subscribed. Contact support to update your profile.'));
+    }
+
+    // Generate customer ID
+    const count = await dbGet('SELECT COUNT(*) as c FROM customers');
+    const customerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+
+    await dbRun(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
+      [contact_name, company, customerId, email, cc_emails || '',
+       Array.isArray(products) ? products.join('; ') : (products || ''),
+       Array.isArray(markets) ? markets.join('; ') : (markets || ''),
+       Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
+       Array.isArray(regions) ? regions.join('; ') : (regions || ''),
+       customer_type || 'End User', subscription_tier || 'All Announcements']);
+
+    res.redirect('/subscribe?success=' + encodeURIComponent('Thank you! You are now subscribed to PSI publication notifications.'));
+  } catch (err) {
+    console.error('Subscribe error:', err);
+    res.redirect('/subscribe?error=' + encodeURIComponent('An error occurred. Please try again.'));
   }
 });
 
