@@ -1,0 +1,215 @@
+<%- include('partials/head', { title: 'Distribution Preview' }) %>
+<%- include('partials/nav', { currentPage: 'publications' }) %>
+
+<div class="page-header">
+    <div>
+        <h1>Distribution Preview</h1>
+        <div class="subtitle">Review and select recipients before distributing</div>
+    </div>
+    <div class="actions">
+        <a href="/publications" class="btn btn-secondary">Cancel</a>
+    </div>
+</div>
+
+<!-- Publication Summary -->
+<div class="card" style="margin-bottom: 16px;">
+    <div class="card-body" style="padding: 16px 20px;">
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+            <div>
+                <span class="badge badge-<%= publication.urgency === 'Critical/Safety' ? 'critical' : publication.urgency === 'High' ? 'high' : publication.urgency === 'Standard' ? 'standard' : 'informational' %>"><%= publication.urgency %></span>
+            </div>
+            <div style="flex:1; min-width: 200px;">
+                <strong style="font-size: 15px;"><%= publication.publication_number %></strong>
+                <span style="color: var(--gray-500);"> &mdash; </span>
+                <span style="font-size: 15px;"><%= publication.title %></span>
+            </div>
+            <div style="font-size: 12px; color: var(--gray-500); text-align: right;">
+                <div><%= publication.content_type %></div>
+                <div><%= publication.products %></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Matched Recipients -->
+<div class="card" style="margin-bottom: 12px;">
+    <div class="card-header" style="padding: 12px 20px; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong style="font-size: 14px;">Matching Recipients</strong>
+            <span class="log-group-count" style="margin-left: 8px;"><%= matched.length %></span>
+            <span style="font-size: 12px; color: var(--gray-500); margin-left: 8px;">Customers matching product, market, region, content type &amp; tier criteria</span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <a href="#" onclick="toggleAll('matched', true); return false;" class="btn btn-secondary btn-sm">Select All</a>
+            <a href="#" onclick="toggleAll('matched', false); return false;" class="btn btn-secondary btn-sm">Deselect All</a>
+        </div>
+    </div>
+    <div class="card-body" style="padding: 0;">
+        <% if (matched.length > 0) { %>
+        <table class="log-group-table">
+            <thead>
+                <tr>
+                    <th style="width: 36px;"></th>
+                    <th>Customer ID</th>
+                    <th>Contact</th>
+                    <th>Company</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Tier</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% matched.forEach(function(c) { %>
+                <tr>
+                    <td><input type="checkbox" class="dist-checkbox matched-cb" value="<%= c.id %>" checked></td>
+                    <td><%= c.customer_id %></td>
+                    <td><%= c.contact_name %></td>
+                    <td><%= c.company %></td>
+                    <td><%= c.email %></td>
+                    <td><%= c.customer_type %></td>
+                    <td><%= c.subscription_tier %></td>
+                </tr>
+                <% }); %>
+            </tbody>
+        </table>
+        <% } else { %>
+        <div style="padding: 24px; text-align: center; color: var(--gray-500); font-size: 13px;">
+            No customers match this publication's criteria. You can manually add recipients from the list below.
+        </div>
+        <% } %>
+    </div>
+</div>
+
+<!-- Unmatched Recipients (collapsed by default) -->
+<% if (unmatched.length > 0) { %>
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header" onclick="toggleUnmatched()" style="padding: 12px 20px; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+        <div>
+            <span id="unmatchedToggle" style="font-size: 10px; color: var(--gray-400); margin-right: 6px;">&#9654;</span>
+            <strong style="font-size: 14px;">Other Active Customers</strong>
+            <span class="log-group-count" style="margin-left: 8px;"><%= unmatched.length %></span>
+            <span style="font-size: 12px; color: var(--gray-500); margin-left: 8px;">Not matching criteria &mdash; select to include manually</span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;" onclick="event.stopPropagation();">
+            <a href="#" onclick="toggleAll('unmatched', true); return false;" class="btn btn-secondary btn-sm">Select All</a>
+            <a href="#" onclick="toggleAll('unmatched', false); return false;" class="btn btn-secondary btn-sm">Deselect All</a>
+        </div>
+    </div>
+    <div id="unmatchedBody" style="display: none;">
+        <table class="log-group-table">
+            <thead>
+                <tr>
+                    <th style="width: 36px;"></th>
+                    <th>Customer ID</th>
+                    <th>Contact</th>
+                    <th>Company</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Tier</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% unmatched.forEach(function(c) { %>
+                <tr>
+                    <td><input type="checkbox" class="dist-checkbox unmatched-cb" value="<%= c.id %>"></td>
+                    <td><%= c.customer_id %></td>
+                    <td><%= c.contact_name %></td>
+                    <td><%= c.company %></td>
+                    <td><%= c.email %></td>
+                    <td><%= c.customer_type %></td>
+                    <td><%= c.subscription_tier %></td>
+                </tr>
+                <% }); %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
+
+<!-- Distribute Action -->
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
+    <div style="font-size: 14px; font-weight: 600; color: var(--gray-700);">
+        <span id="selectedTotal">0</span> recipient(s) selected
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <a href="/publications" class="btn btn-secondary">Cancel</a>
+        <button type="button" class="btn btn-primary btn-lg" id="distributeBtn" onclick="executeDistribute()">
+            Distribute to Selected Recipients
+        </button>
+    </div>
+</div>
+
+<script>
+function updateCount() {
+    var count = document.querySelectorAll('.dist-checkbox:checked').length;
+    document.getElementById('selectedTotal').textContent = count;
+    document.getElementById('distributeBtn').disabled = count === 0;
+}
+
+function toggleAll(group, state) {
+    var cls = group === 'matched' ? '.matched-cb' : '.unmatched-cb';
+    document.querySelectorAll(cls).forEach(function(cb) { cb.checked = state; });
+    updateCount();
+}
+
+function toggleUnmatched() {
+    var body = document.getElementById('unmatchedBody');
+    var toggle = document.getElementById('unmatchedToggle');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.innerHTML = '&#9660;';
+    } else {
+        body.style.display = 'none';
+        toggle.innerHTML = '&#9654;';
+    }
+}
+
+// Listen for checkbox changes
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('dist-checkbox')) updateCount();
+});
+
+// Initial count
+updateCount();
+
+function executeDistribute() {
+    var checked = document.querySelectorAll('.dist-checkbox:checked');
+    var ids = [];
+    checked.forEach(function(cb) { ids.push(parseInt(cb.value)); });
+
+    if (ids.length === 0) {
+        alert('No recipients selected.');
+        return;
+    }
+
+    if (!confirm('Distribute this publication to ' + ids.length + ' recipient(s)? Emails will be sent immediately.')) return;
+
+    var btn = document.getElementById('distributeBtn');
+    btn.disabled = true;
+    btn.textContent = 'Distributing...';
+
+    fetch('/publications/<%= publication.id %>/distribute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerIds: ids })
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.success) {
+            location.href = '/publications?success=' + encodeURIComponent('Distributed to ' + data.count + ' recipient(s) successfully');
+        } else {
+            btn.disabled = false;
+            btn.textContent = 'Distribute to Selected Recipients';
+            alert(data.error || 'Distribution failed');
+        }
+    }).catch(function() {
+        btn.disabled = false;
+        btn.textContent = 'Distribute to Selected Recipients';
+        alert('Distribution request failed');
+    });
+}
+</script>
+
+</main>
+</div>
+</body>
+</html>

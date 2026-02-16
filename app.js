@@ -623,16 +623,66 @@ app.post('/publications/:id/delete', async (req, res) => {
   }
 });
 
-// Approve and distribute
+// Legacy approve route — redirect to new preview flow
 app.post('/publications/:id/approve', (req, res) => {
-  const id = req.params.id;
-  db.run('UPDATE publications SET distribution_status = ? WHERE id = ?', ['Approved', id], (err) => {
-    if (err) {
-      return res.redirect('/publications?error=' + encodeURIComponent('Error approving publication'));
+  res.redirect('/publications/' + req.params.id + '/distribute');
+});
+
+// Distribution preview — show matching customers with checkboxes
+app.get('/publications/:id/distribute', async (req, res) => {
+  try {
+    const pub = await dbGet('SELECT * FROM publications WHERE id = ?', [req.params.id]);
+    if (!pub) return res.redirect('/publications?error=' + encodeURIComponent('Publication not found'));
+
+    const allCustomers = await dbAll("SELECT * FROM customers WHERE status = 'Active' ORDER BY company, contact_name");
+
+    const matched = [];
+    const unmatched = [];
+    allCustomers.forEach(c => {
+      if (matches(pub, c)) {
+        matched.push(c);
+      } else {
+        unmatched.push(c);
+      }
+    });
+
+    res.render('distribute_preview', { publication: pub, matched, unmatched });
+  } catch (err) {
+    console.error('Distribution preview error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Execute distribution to selected customers
+app.post('/publications/:id/distribute', express.json(), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { customerIds } = req.body;
+
+    if (!Array.isArray(customerIds) || customerIds.length === 0) {
+      return res.status(400).json({ error: 'No customers selected' });
     }
-    distributePublication(id);
-    res.redirect('/publications?success=' + encodeURIComponent('Publication approved and distribution started'));
-  });
+
+    const pub = await dbGet('SELECT * FROM publications WHERE id = ?', [id]);
+    if (!pub) return res.status(404).json({ error: 'Publication not found' });
+
+    let recipientsCount = 0;
+    for (const custId of customerIds) {
+      const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [custId]);
+      if (!customer) continue;
+      sendEmail(pub, customer);
+      logDistribution(pub, customer);
+      recipientsCount++;
+    }
+
+    await dbRun('UPDATE publications SET distribution_status = ?, date_published = datetime("now"), recipients_count = ? WHERE id = ?',
+      ['Distributed', recipientsCount, id]);
+
+    res.json({ success: true, count: recipientsCount });
+  } catch (err) {
+    console.error('Distribution error:', err);
+    res.status(500).json({ error: 'Distribution failed' });
+  }
 });
 
 // Download publication
@@ -648,44 +698,6 @@ app.get('/publications/:id/download', (req, res) => {
 // ============================================================
 // DISTRIBUTION LOGIC
 // ============================================================
-
-function distributePublication(publicationId) {
-  console.log(`Starting distribution for publication ID: ${publicationId}`);
-
-  db.get('SELECT * FROM publications WHERE id = ?', [publicationId], (err, pub) => {
-    if (err || !pub) {
-      console.log('Error getting publication:', err);
-      return;
-    }
-
-    console.log(`Distributing: ${pub.title} (${pub.publication_number})`);
-
-    db.all('SELECT * FROM customers WHERE status = ?', ['Active'], (err, customers) => {
-      if (err) {
-        console.log('Error getting customers:', err);
-        return;
-      }
-
-      console.log(`Found ${customers.length} active customers`);
-      let recipientsCount = 0;
-
-      customers.forEach(customer => {
-        const match = matches(pub, customer);
-        console.log(`Checking ${customer.contact_name} (${customer.company}): ${match ? 'MATCH' : 'NO MATCH'}`);
-        if (match) {
-          sendEmail(pub, customer);
-          logDistribution(pub, customer);
-          recipientsCount++;
-        }
-      });
-
-      console.log(`Distribution complete: ${recipientsCount} recipients`);
-
-      db.run('UPDATE publications SET distribution_status = ?, date_published = datetime("now"), recipients_count = ? WHERE id = ?',
-        ['Distributed', recipientsCount, publicationId]);
-    });
-  });
-}
 
 // Matching logic
 function matches(publication, customer) {

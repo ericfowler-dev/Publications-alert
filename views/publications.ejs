@@ -85,9 +85,7 @@
                         <td><%= pub.date_published ? new Date(pub.date_published).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' %></td>
                         <td class="actions">
                             <% if (pub.distribution_status === 'Draft') { %>
-                                <form action="/publications/<%= pub.id %>/approve" method="POST" style="display: inline;" onsubmit="return confirm('This will distribute the publication to all matching customers. Continue?')">
-                                    <button type="submit" class="btn btn-success btn-sm">Distribute</button>
-                                </form>
+                                <a href="/publications/<%= pub.id %>/distribute" class="btn btn-success btn-sm">Distribute</a>
                             <% } %>
                             <a href="/publications/<%= pub.id %>/edit" class="btn btn-secondary btn-sm">Edit</a>
                             <% if (pub.file_path) { %>
