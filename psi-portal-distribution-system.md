@@ -228,7 +228,7 @@ This is the customer subscription database. Each item is one customer contact wi
 | **Content Types** | Choice (multi-select) | Yes | **Same values as Document Library** + "All Content Types" |
 | **Regions** | Choice (multi-select) | Yes | **Same values as Document Library** + "Global" |
 | **Customer Type** | Choice (single-select) | Yes | OEM, Distributor, Dealer, End User, Internal |
-| **Subscription Tier** | Choice (single-select) | Yes | Essential, Standard, Comprehensive |
+| **Subscription Tier** | Choice (single-select) | Yes | Essential, Standard, All Announcements |
 | **Preferred Frequency** | Choice (single-select) | No | Immediate, Daily Digest, Weekly Digest (default: Immediate) |
 | **Status** | Choice (single-select) | Yes | Active, Inactive, Suspended |
 | **Date Added** | Date | Auto | When the record was created |
@@ -349,8 +349,8 @@ STEP 3: LOOP THROUGH EACH CUSTOMER — "Apply to each"
   │  │  TIER MATCH:                                    │
   │  │    If Urgency = Critical/Safety → all tiers     │
   │  │    If Urgency = High or Standard → Standard     │
-  │  │    and Comprehensive only                       │
-  │  │    If Urgency = Informational → Comprehensive   │
+  │  │    and All Announcements only                       │
+  │  │    If Urgency = Informational → All Announcements   │
   │  │    only                                         │
   │  └─────────────────────────────────────────────────┘
   │       │

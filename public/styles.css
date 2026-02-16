@@ -448,7 +448,7 @@ td.actions { white-space: nowrap; text-align: right; }
   line-height: 1.4;
   white-space: nowrap;
 }
-.badge-active, .badge-sent { background: var(--success-light); color: #155724; }
+.badge-active, .badge-sent, .badge-resent { background: var(--success-light); color: #155724; }
 .badge-inactive, .badge-failed { background: var(--danger-light); color: #721c24; }
 .badge-suspended { background: var(--gray-200); color: var(--gray-600); }
 .badge-draft { background: var(--warning-light); color: #856404; }
@@ -459,7 +459,7 @@ td.actions { white-space: nowrap; text-align: right; }
 .badge-standard { background: var(--primary); color: white; }
 .badge-informational { background: var(--gray-200); color: var(--gray-600); }
 .badge-essential { background: var(--gray-200); color: var(--gray-600); }
-.badge-comprehensive { background: var(--primary-50); color: var(--primary); }
+.badge-comprehensive, .badge-all-announcements { background: var(--primary-50); color: var(--primary); }
 
 .tag {
   display: inline-block;
@@ -513,13 +513,35 @@ td.actions { white-space: nowrap; text-align: right; }
 .metadata-list { margin-top: 12px; max-height: 350px; overflow-y: auto; }
 .metadata-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 8px 0;
   border-bottom: 1px solid var(--gray-100);
+  transition: opacity 0.2s, background-color 0.2s;
 }
 .metadata-item:last-child { border-bottom: none; }
-.metadata-value { font-size: 13px; color: var(--gray-700); }
+.metadata-item .metadata-actions { margin-left: auto; }
+.metadata-value { font-size: 13px; color: var(--gray-700); flex: 1; }
+
+/* Drag handle */
+.drag-handle {
+  cursor: grab;
+  color: var(--gray-400);
+  font-size: 16px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+  user-select: none;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.drag-handle:hover { color: var(--primary); background: var(--primary-50); }
+.drag-handle:active { cursor: grabbing; }
+
+/* Drag states */
+.metadata-item.dragging { opacity: 0.3; background: var(--primary-50); }
+.metadata-item.drag-over-above { border-top: 2px solid var(--primary); padding-top: 6px; }
+.metadata-item.drag-over-below { border-bottom: 2px solid var(--primary); padding-bottom: 6px; }
 .btn-danger-ghost {
   background: none;
   border: none;

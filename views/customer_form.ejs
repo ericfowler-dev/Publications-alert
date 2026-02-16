@@ -136,9 +136,9 @@
                 <select name="subscription_tier" required>
                     <option value="Essential" <%= customer && customer.subscription_tier === 'Essential' ? 'selected' : '' %>>Essential</option>
                     <option value="Standard" <%= customer && customer.subscription_tier === 'Standard' ? 'selected' : '' %>>Standard</option>
-                    <option value="Comprehensive" <%= customer && customer.subscription_tier === 'Comprehensive' ? 'selected' : '' %>>Comprehensive</option>
+                    <option value="All Announcements" <%= customer && customer.subscription_tier === 'All Announcements' ? 'selected' : '' %>>All Announcements</option>
                 </select>
-                <div class="help-text">Essential = Critical/Safety only | Standard = High + Standard | Comprehensive = All urgency levels</div>
+                <div class="help-text">Essential = Critical/Safety only | Standard = High + Standard | All Announcements = All urgency levels</div>
             </div>
         </div>
         <div class="form-row">

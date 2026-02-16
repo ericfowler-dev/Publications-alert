@@ -36,7 +36,7 @@ A Node.js web application that automates the distribution of PSI publications to
    - **Markets**: Select markets (e.g., "Power Systems", "Industrial")
    - **Content Types**: Select "Service Bulletin", "Safety Notice", etc.
    - **Regions**: Select "North America", "EMEA", etc.
-   - **Subscription Tier**: Choose "Essential", "Standard", or "Comprehensive"
+   - **Subscription Tier**: Choose "Essential", "Standard", or "All Announcements"
    - **Status**: Set to "Active"
 
 ### 2. Upload a Test Publication

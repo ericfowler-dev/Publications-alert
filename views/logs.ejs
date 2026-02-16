@@ -54,6 +54,7 @@
                         <th>Company</th>
                         <th>Email</th>
                         <th>Status</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -71,6 +72,11 @@
                         <td><%= log.recipient_company %></td>
                         <td><%= log.recipient_email %></td>
                         <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
+                        <td class="actions">
+                            <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
+                                <button type="submit" class="btn btn-secondary btn-sm" title="Resend">&#8635; Resend</button>
+                            </form>
+                        </td>
                     </tr>
                     <% }); %>
                 </tbody>

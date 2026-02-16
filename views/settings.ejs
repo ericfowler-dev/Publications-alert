@@ -11,7 +11,7 @@
 <div class="page-header">
     <div>
         <h1>Settings</h1>
-        <div class="subtitle">Manage system metadata and taxonomy. Changes here affect the options available in customer and publication forms.</div>
+        <div class="subtitle">Manage system metadata and taxonomy. Drag items to reorder.</div>
     </div>
 </div>
 
@@ -30,19 +30,12 @@
                     <button type="submit" class="btn btn-primary btn-sm">Add</button>
                 </div>
             </form>
-            <div class="metadata-list">
+            <div class="metadata-list" data-category="product">
                 <% metadata.products.forEach(function(item) { %>
-                <div class="metadata-item" data-id="<%= item.id %>">
+                <div class="metadata-item" data-id="<%= item.id %>" draggable="true">
+                    <span class="drag-handle" title="Drag to reorder">&#x2807;</span>
                     <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
                     <div class="metadata-actions">
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="up">
-                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
-                        </form>
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="down">
-                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
-                        </form>
                         <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
                         <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
                             <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
@@ -68,19 +61,12 @@
                     <button type="submit" class="btn btn-primary btn-sm">Add</button>
                 </div>
             </form>
-            <div class="metadata-list">
+            <div class="metadata-list" data-category="market">
                 <% metadata.markets.forEach(function(item) { %>
-                <div class="metadata-item" data-id="<%= item.id %>">
+                <div class="metadata-item" data-id="<%= item.id %>" draggable="true">
+                    <span class="drag-handle" title="Drag to reorder">&#x2807;</span>
                     <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
                     <div class="metadata-actions">
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="up">
-                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
-                        </form>
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="down">
-                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
-                        </form>
                         <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
                         <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
                             <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
@@ -106,19 +92,12 @@
                     <button type="submit" class="btn btn-primary btn-sm">Add</button>
                 </div>
             </form>
-            <div class="metadata-list">
+            <div class="metadata-list" data-category="content_type">
                 <% metadata.content_types.forEach(function(item) { %>
-                <div class="metadata-item" data-id="<%= item.id %>">
+                <div class="metadata-item" data-id="<%= item.id %>" draggable="true">
+                    <span class="drag-handle" title="Drag to reorder">&#x2807;</span>
                     <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
                     <div class="metadata-actions">
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="up">
-                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
-                        </form>
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="down">
-                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
-                        </form>
                         <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
                         <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
                             <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
@@ -144,19 +123,12 @@
                     <button type="submit" class="btn btn-primary btn-sm">Add</button>
                 </div>
             </form>
-            <div class="metadata-list">
+            <div class="metadata-list" data-category="region">
                 <% metadata.regions.forEach(function(item) { %>
-                <div class="metadata-item" data-id="<%= item.id %>">
+                <div class="metadata-item" data-id="<%= item.id %>" draggable="true">
+                    <span class="drag-handle" title="Drag to reorder">&#x2807;</span>
                     <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
                     <div class="metadata-actions">
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="up">
-                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
-                        </form>
-                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
-                            <input type="hidden" name="direction" value="down">
-                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
-                        </form>
                         <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
                         <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
                             <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
@@ -179,9 +151,12 @@ function startEdit(id, currentValue) {
     var span = document.getElementById('val-' + id);
     var parent = span.closest('.metadata-item');
     var actionsDiv = parent.querySelector('.metadata-actions');
+    var handle = parent.querySelector('.drag-handle');
 
     span.style.display = 'none';
     actionsDiv.style.display = 'none';
+    if (handle) handle.style.display = 'none';
+    parent.setAttribute('draggable', 'false');
 
     var editForm = document.createElement('form');
     editForm.action = '/settings/metadata/' + id + '/edit';
@@ -212,6 +187,8 @@ function startEdit(id, currentValue) {
         editForm.remove();
         span.style.display = '';
         actionsDiv.style.display = '';
+        if (handle) handle.style.display = '';
+        parent.setAttribute('draggable', 'true');
     };
 
     editForm.appendChild(input);
@@ -222,6 +199,92 @@ function startEdit(id, currentValue) {
     input.focus();
     input.select();
 }
+
+// Drag and drop reordering
+var dragItem = null;
+var dragList = null;
+
+document.querySelectorAll('.metadata-list').forEach(function(list) {
+    list.addEventListener('dragstart', function(e) {
+        var item = e.target.closest('.metadata-item');
+        if (!item) return;
+        dragItem = item;
+        dragList = list;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.dataset.id);
+    });
+
+    list.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var target = e.target.closest('.metadata-item');
+        if (!target || target === dragItem || target.parentNode !== dragList) return;
+
+        // Remove all drag-over classes
+        list.querySelectorAll('.metadata-item').forEach(function(el) {
+            el.classList.remove('drag-over-above', 'drag-over-below');
+        });
+
+        var rect = target.getBoundingClientRect();
+        var midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+            target.classList.add('drag-over-above');
+        } else {
+            target.classList.add('drag-over-below');
+        }
+    });
+
+    list.addEventListener('dragleave', function(e) {
+        var target = e.target.closest('.metadata-item');
+        if (target) {
+            target.classList.remove('drag-over-above', 'drag-over-below');
+        }
+    });
+
+    list.addEventListener('drop', function(e) {
+        e.preventDefault();
+        var target = e.target.closest('.metadata-item');
+        if (!target || target === dragItem || target.parentNode !== dragList) return;
+
+        var rect = target.getBoundingClientRect();
+        var midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+            list.insertBefore(dragItem, target);
+        } else {
+            list.insertBefore(dragItem, target.nextSibling);
+        }
+
+        // Clean up classes
+        list.querySelectorAll('.metadata-item').forEach(function(el) {
+            el.classList.remove('drag-over-above', 'drag-over-below');
+        });
+
+        // Save new order via AJAX
+        var ids = [];
+        list.querySelectorAll('.metadata-item').forEach(function(el) {
+            ids.push(parseInt(el.dataset.id));
+        });
+        fetch('/settings/metadata/reorder-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+        }).then(function(res) {
+            if (!res.ok) console.error('Reorder save failed');
+        });
+    });
+
+    list.addEventListener('dragend', function() {
+        if (dragItem) {
+            dragItem.classList.remove('dragging');
+            dragItem = null;
+            dragList = null;
+        }
+        list.querySelectorAll('.metadata-item').forEach(function(el) {
+            el.classList.remove('drag-over-above', 'drag-over-below');
+        });
+    });
+});
 </script>
 
 </main>

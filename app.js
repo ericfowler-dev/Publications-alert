@@ -87,6 +87,9 @@ function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Migrate old "Comprehensive" tier to "All Announcements"
+    db.run("UPDATE customers SET subscription_tier = 'All Announcements' WHERE subscription_tier = 'Comprehensive'");
+
     // Seed metadata if empty
     db.get('SELECT COUNT(*) as count FROM metadata', [], (err, row) => {
       if (err || (row && row.count === 0)) {
@@ -544,17 +547,18 @@ function matches(publication, customer) {
   if (publication.urgency === 'Critical/Safety') {
     // All tiers
   } else if (publication.urgency === 'High' || publication.urgency === 'Standard') {
-    tierMatch = customer.subscription_tier === 'Standard' || customer.subscription_tier === 'Comprehensive';
+    tierMatch = customer.subscription_tier === 'Standard' || customer.subscription_tier === 'All Announcements';
   } else if (publication.urgency === 'Informational') {
-    tierMatch = customer.subscription_tier === 'Comprehensive';
+    tierMatch = customer.subscription_tier === 'All Announcements';
   }
 
   return productMatch && marketMatch && contentTypeMatch && regionMatch && tierMatch;
 }
 
-// Send email
+// Send email with document attached
 function sendEmail(publication, customer) {
-  const subject = `[PSI ${publication.content_type}] ${publication.urgency} — ${publication.title} — ${publication.products}`;
+  const shortTitle = publication.title.length > 50 ? publication.title.substring(0, 50).trim() : publication.title;
+  const subject = `PSI ${publication.content_type} ${publication.publication_number} – ${shortTitle}`;
   const fromAddress = process.env.SMTP_FROM || 'publications@psi.com';
 
   console.log(`EMAIL: To=${customer.email} Subject="${subject}"`);
@@ -564,8 +568,17 @@ function sendEmail(publication, customer) {
     to: customer.email,
     cc: customer.cc_emails || undefined,
     subject: subject,
-    html: generateEmailHTML(publication, customer)
+    html: generateEmailHTML(publication)
   };
+
+  // Attach the document if a file exists
+  if (publication.file_path && fs.existsSync(publication.file_path)) {
+    mailOptions.attachments = [{
+      filename: publication.file_name || path.basename(publication.file_path),
+      path: publication.file_path
+    }];
+    console.log(`  Attaching: ${mailOptions.attachments[0].filename}`);
+  }
 
   if (transporter) {
     transporter.sendMail(mailOptions, (error, info) => {
@@ -581,38 +594,88 @@ function sendEmail(publication, customer) {
 }
 
 // Generate email HTML
-function generateEmailHTML(publication, customer) {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-  const urgencyColor = publication.urgency === 'Critical/Safety' ? '#cc0000' : publication.urgency === 'High' ? '#e67700' : '#43A047';
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; color: #333;">
-      <div style="background-color: #43A047; padding: 20px 30px; color: white;">
-        <h2 style="margin: 0; font-size: 18px;">POWER SOLUTIONS INTERNATIONAL</h2>
-        <p style="margin: 5px 0 0; font-size: 12px; color: #a5d6a7;">Publication Notification</p>
-      </div>
-      ${publication.urgency !== 'Informational' ? `<div style="background-color: ${urgencyColor}; color: white; padding: 10px 30px; font-weight: bold; font-size: 14px;">&#9632; ${publication.urgency} PRIORITY</div>` : ''}
-      <div style="padding: 30px; background-color: #f9f9f9; border: 1px solid #ddd;">
-        <table style="width: 100%; font-size: 14px; margin-bottom: 20px;">
-          <tr><td style="color: #666; width: 140px; padding: 5px 0;">Publication:</td><td style="font-weight: bold;">${publication.publication_number}</td></tr>
-          <tr><td style="color: #666; padding: 5px 0;">Type:</td><td>${publication.content_type}</td></tr>
-          <tr><td style="color: #666; padding: 5px 0;">Products:</td><td>${publication.products}</td></tr>
-          <tr><td style="color: #666; padding: 5px 0;">Markets:</td><td>${publication.markets}</td></tr>
-          <tr><td style="color: #666; padding: 5px 0;">Date:</td><td>${new Date().toLocaleDateString()}</td></tr>
-        </table>
-        <hr style="border: none; border-top: 1px solid #ddd;">
-        <h3 style="color: #43A047; margin-top: 20px;">${publication.title}</h3>
-        <p style="line-height: 1.6;">${publication.summary}</p>
-        ${publication.action_required ? `<div style="background-color: #fff3cd; border-left: 4px solid #e67700; padding: 15px; margin: 20px 0;"><strong>Action Required:</strong><br>${publication.action_required}</div>` : ''}
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${baseUrl}/publications/${publication.id}/download" style="background-color: #43A047; color: white; padding: 14px 40px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 15px; display: inline-block;">View Full Document</a>
-        </div>
-      </div>
-      <div style="padding: 20px 30px; font-size: 11px; color: #999; background-color: #f0f0f0;">
-        <p>You received this notification because your PSI distribution profile includes: ${customer.products}, ${customer.markets}.</p>
-        <p>&copy; 2026 Power Solutions International. All rights reserved.</p>
-      </div>
+function generateEmailHTML(publication) {
+  const releaseDate = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const products = publication.products ? publication.products.replace(/;/g, ', ') : '';
+  const fileName = publication.file_name || '';
+
+  const actionBlock = publication.action_required ? `
+                <div style="border-left:4px solid #e67700; background-color:#fff7e6; padding:12px 14px; margin:0 0 16px 0;">
+                  <div style="font-size:14px; line-height:1.55;">
+                    <strong>Action Required</strong><br>
+                    ${publication.action_required}
+                  </div>
+                </div>` : '';
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PSI ${publication.content_type} ${publication.publication_number}</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#f6f7f9;">
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent;">
+      ${publication.content_type} ${publication.publication_number}. ${publication.title}.
     </div>
-  `;
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f6f7f9;">
+      <tr>
+        <td align="center" style="padding:24px 12px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="650" style="max-width:650px; width:100%; border-collapse:collapse; background-color:#ffffff; border:1px solid #e6e8eb; border-radius:10px; overflow:hidden;">
+            <tr>
+              <td style="padding:18px 22px; background-color:#43A047; color:#ffffff; font-family:Arial, sans-serif;">
+                <div style="font-size:16px; font-weight:700; letter-spacing:0.2px;">
+                  POWER SOLUTIONS INTERNATIONAL
+                </div>
+                <div style="font-size:12px; opacity:0.9; margin-top:4px;">
+                  Publication Notification
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px; font-family:Arial, sans-serif; color:#222;">
+                <div style="font-size:16px; font-weight:700; margin:0 0 10px 0;">
+                  ${publication.content_type} ${publication.publication_number}
+                </div>
+                <div style="font-size:14px; line-height:1.55; margin:0 0 14px 0;">
+                  <strong>Title:</strong> ${publication.title}<br>
+                  <strong>Release Date:</strong> ${releaseDate}<br>
+                  <strong>Priority:</strong> ${publication.urgency}
+                </div>
+                <div style="border:1px solid #e6e8eb; background-color:#fbfbfc; border-radius:8px; padding:14px; margin:0 0 16px 0;">
+                  <div style="font-size:13px; color:#444; line-height:1.55;">
+                    <strong>Applies To</strong><br>
+                    ${products}${publication.markets ? ' &mdash; ' + publication.markets.replace(/;/g, ', ') : ''}
+                  </div>
+                </div>
+                ${publication.summary ? `<div style="font-size:14px; line-height:1.65; margin:0 0 12px 0;">
+                  <strong>Summary</strong><br>
+                  ${publication.summary}
+                </div>` : ''}
+                ${actionBlock}
+                ${fileName ? `<div style="border:1px solid #e6e8eb; background-color:#fbfbfc; border-radius:8px; padding:14px; margin:0 0 16px 0;">
+                  <div style="font-size:13px; color:#444; line-height:1.55;">
+                    <strong>&#128206; Attached Document</strong><br>
+                    ${fileName}
+                  </div>
+                </div>` : ''}
+                <div style="font-size:13px; color:#444; line-height:1.6; margin-top:14px;">
+                  Questions: reply to this email or contact Technical Support.
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 22px; background-color:#f3f4f6; font-family:Arial, sans-serif; color:#666; font-size:11px; line-height:1.5;">
+                You received this notification based on your PSI distribution profile.<br>
+                &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
 }
 
 // Log distribution
@@ -654,6 +717,34 @@ app.get('/logs', async (req, res) => {
   } catch (err) {
     console.error('Logs error:', err);
     res.status(500).send('Server error');
+  }
+});
+
+// Resend a distribution email
+app.post('/logs/:id/resend', async (req, res) => {
+  try {
+    const logEntry = await dbGet('SELECT * FROM distribution_logs WHERE id = ?', [req.params.id]);
+    if (!logEntry) {
+      return res.redirect('/logs?error=' + encodeURIComponent('Log entry not found'));
+    }
+
+    const publication = await dbGet('SELECT * FROM publications WHERE publication_number = ?', [logEntry.publication_number]);
+    const customer = await dbGet('SELECT * FROM customers WHERE email = ? AND company = ?', [logEntry.recipient_email, logEntry.recipient_company]);
+
+    if (!publication || !customer) {
+      return res.redirect('/logs?error=' + encodeURIComponent('Could not find original publication or customer record'));
+    }
+
+    sendEmail(publication, customer);
+
+    await dbRun(`INSERT INTO distribution_logs (publication_number, publication_title, content_type, urgency, recipient_name, recipient_company, recipient_email, delivery_status, match_reason)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Resent', ?)`,
+      [logEntry.publication_number, logEntry.publication_title, logEntry.content_type, logEntry.urgency, logEntry.recipient_name, logEntry.recipient_company, logEntry.recipient_email, 'Manual resend']);
+
+    res.redirect('/logs?success=' + encodeURIComponent(`Resent notification to ${logEntry.recipient_name} (${logEntry.recipient_email})`));
+  } catch (err) {
+    console.error('Resend error:', err);
+    res.redirect('/logs?error=' + encodeURIComponent('Error resending notification'));
   }
 });
 
@@ -704,7 +795,7 @@ app.post('/settings/metadata/:id/delete', (req, res) => {
   });
 });
 
-// Reorder metadata item
+// Reorder metadata item (up/down buttons)
 app.post('/settings/metadata/:id/reorder', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -735,6 +826,23 @@ app.post('/settings/metadata/:id/reorder', async (req, res) => {
   } catch (err) {
     console.error('Reorder error:', err);
     res.redirect('/settings?error=' + encodeURIComponent('Error reordering item'));
+  }
+});
+
+// Drag-and-drop reorder (AJAX)
+app.post('/settings/metadata/reorder-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Invalid ids array' });
+    }
+    for (let i = 0; i < ids.length; i++) {
+      await dbRun('UPDATE metadata SET sort_order = ? WHERE id = ?', [i, parseInt(ids[i])]);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Bulk reorder error:', err);
+    res.status(500).json({ error: 'Reorder failed' });
   }
 });
 
