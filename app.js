@@ -180,6 +180,9 @@ app.use(express.static('public'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// Trust proxy (Render, Heroku, etc.) so secure cookies work behind HTTPS reverse proxy
+app.set('trust proxy', 1);
+
 // Session setup
 app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
