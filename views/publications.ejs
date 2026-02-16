@@ -1,0 +1,135 @@
+<%- include('partials/head', { title: 'Publications' }) %>
+<%- include('partials/nav', { currentPage: 'publications' }) %>
+
+<% if (success) { %>
+<div class="toast toast-success" id="toast"><%= success %></div>
+<% } %>
+<% if (error) { %>
+<div class="toast toast-error" id="toast"><%= error %></div>
+<% } %>
+
+<div class="page-header">
+    <div>
+        <h1>Publications</h1>
+        <div class="subtitle"><%= publications.length %> publication(s)</div>
+    </div>
+    <div class="actions">
+        <a href="/publications/new" class="btn btn-primary">Upload New Publication</a>
+    </div>
+</div>
+
+<!-- Toolbar -->
+<div class="table-toolbar">
+    <form method="GET" action="/publications" class="toolbar-search">
+        <input type="text" name="search" placeholder="Search by title or publication number..." value="<%= search %>" class="search-input">
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+        <% if (search || statusFilter || urgencyFilter) { %>
+            <a href="/publications" class="btn btn-secondary btn-sm">Clear</a>
+        <% } %>
+    </form>
+    <div class="filter-group">
+        <span class="filter-label">Status:</span>
+        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Draft" class="filter-pill <%= statusFilter === 'Draft' ? 'active' : '' %>">Draft</a>
+        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Distributed" class="filter-pill <%= statusFilter === 'Distributed' ? 'active' : '' %>">Distributed</a>
+        <span class="filter-label" style="margin-left: 12px;">Urgency:</span>
+        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Critical/Safety" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
+        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=High" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
+    </div>
+</div>
+
+<% if (publications.length > 0) { %>
+<div class="card">
+    <div class="card-body" style="padding: 0;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pub #</th>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Products</th>
+                        <th>Urgency</th>
+                        <th>Status</th>
+                        <th>Recipients</th>
+                        <th>Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% publications.forEach(function(pub) { %>
+                    <tr>
+                        <td><strong><%= pub.publication_number %></strong></td>
+                        <td><%= pub.title %></td>
+                        <td><%= pub.content_type %></td>
+                        <td class="tag-cell">
+                            <% if (pub.products) {
+                                var prods = pub.products.split('; ');
+                                prods.slice(0, 2).forEach(function(p) { %>
+                                    <span class="tag"><%= p %></span>
+                                <% }); if (prods.length > 2) { %>
+                                    <span class="tag tag-more">+<%= prods.length - 2 %></span>
+                                <% }
+                            } %>
+                        </td>
+                        <td>
+                            <span class="badge badge-<%= pub.urgency === 'Critical/Safety' ? 'critical' : pub.urgency === 'High' ? 'high' : pub.urgency === 'Standard' ? 'standard' : 'informational' %>">
+                                <%= pub.urgency %>
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge badge-<%= pub.distribution_status.toLowerCase() %>">
+                                <%= pub.distribution_status %>
+                            </span>
+                        </td>
+                        <td><%= pub.recipients_count || 0 %></td>
+                        <td><%= pub.date_published ? new Date(pub.date_published).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' %></td>
+                        <td class="actions">
+                            <% if (pub.distribution_status === 'Draft') { %>
+                                <form action="/publications/<%= pub.id %>/approve" method="POST" style="display: inline;" onsubmit="return confirm('This will distribute the publication to all matching customers. Continue?')">
+                                    <button type="submit" class="btn btn-success btn-sm">Distribute</button>
+                                </form>
+                            <% } %>
+                            <a href="/publications/<%= pub.id %>/edit" class="btn btn-secondary btn-sm">Edit</a>
+                            <% if (pub.file_path) { %>
+                                <a href="/publications/<%= pub.id %>/download" class="btn btn-primary btn-sm">Download</a>
+                            <% } %>
+                            <% if (pub.distribution_status === 'Draft') { %>
+                                <form action="/publications/<%= pub.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this publication? This cannot be undone.')">
+                                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                </form>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<% } else { %>
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-state-icon">&#9639;</div>
+            <h3>No publications found</h3>
+            <% if (search || statusFilter || urgencyFilter) { %>
+                <p>No publications match your search criteria.</p>
+                <a href="/publications" class="btn btn-secondary">Clear Filters</a>
+            <% } else { %>
+                <p>Upload your first publication to begin distributing to customers.</p>
+                <a href="/publications/new" class="btn btn-primary">Upload Publication</a>
+            <% } %>
+        </div>
+    </div>
+</div>
+<% } %>
+
+<script>
+var toast = document.getElementById('toast');
+if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+</script>
+
+</main>
+</div>
+</body>
+</html>

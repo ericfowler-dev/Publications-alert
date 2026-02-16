@@ -1,0 +1,124 @@
+<%- include('partials/head', { title: 'Customers' }) %>
+<%- include('partials/nav', { currentPage: 'customers' }) %>
+
+<% if (success) { %>
+<div class="toast toast-success" id="toast"><%= success %></div>
+<% } %>
+<% if (error) { %>
+<div class="toast toast-error" id="toast"><%= error %></div>
+<% } %>
+
+<div class="page-header">
+    <div>
+        <h1>Customer Profiles</h1>
+        <div class="subtitle"><%= customers.length %> customer(s) found</div>
+    </div>
+    <div class="actions">
+        <a href="/customers/new" class="btn btn-primary">Add Customer</a>
+    </div>
+</div>
+
+<!-- Toolbar -->
+<div class="table-toolbar">
+    <form method="GET" action="/customers" class="toolbar-search">
+        <input type="text" name="search" placeholder="Search by name, company, or email..." value="<%= search %>" class="search-input">
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+        <% if (search || statusFilter || tierFilter) { %>
+            <a href="/customers" class="btn btn-secondary btn-sm">Clear</a>
+        <% } %>
+    </form>
+    <div class="filter-group">
+        <span class="filter-label">Status:</span>
+        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Active" class="filter-pill <%= statusFilter === 'Active' ? 'active' : '' %>">Active</a>
+        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Inactive" class="filter-pill <%= statusFilter === 'Inactive' ? 'active' : '' %>">Inactive</a>
+        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Suspended" class="filter-pill <%= statusFilter === 'Suspended' ? 'active' : '' %>">Suspended</a>
+    </div>
+</div>
+
+<% if (customers.length > 0) { %>
+<div class="card">
+    <div class="card-body" style="padding: 0;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Contact Name</th>
+                        <th>Company</th>
+                        <th>Email</th>
+                        <th>Products</th>
+                        <th>Markets</th>
+                        <th>Tier</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% customers.forEach(function(customer) { %>
+                    <tr>
+                        <td><strong><%= customer.contact_name %></strong></td>
+                        <td><%= customer.company %></td>
+                        <td><%= customer.email %></td>
+                        <td class="tag-cell">
+                            <% if (customer.products) { %>
+                                <% var prods = customer.products.split('; '); prods.slice(0, 2).forEach(function(p) { %>
+                                    <span class="tag"><%= p %></span>
+                                <% }); if (prods.length > 2) { %>
+                                    <span class="tag tag-more">+<%= prods.length - 2 %></span>
+                                <% } %>
+                            <% } else { %>
+                                <span class="text-muted">None</span>
+                            <% } %>
+                        </td>
+                        <td class="tag-cell">
+                            <% if (customer.markets) { %>
+                                <% var mkts = customer.markets.split('; '); mkts.slice(0, 2).forEach(function(m) { %>
+                                    <span class="tag"><%= m %></span>
+                                <% }); if (mkts.length > 2) { %>
+                                    <span class="tag tag-more">+<%= mkts.length - 2 %></span>
+                                <% } %>
+                            <% } else { %>
+                                <span class="text-muted">None</span>
+                            <% } %>
+                        </td>
+                        <td><span class="badge badge-<%= customer.subscription_tier ? customer.subscription_tier.toLowerCase() : '' %>"><%= customer.subscription_tier %></span></td>
+                        <td><span class="badge badge-<%= customer.status.toLowerCase() %>"><%= customer.status %></span></td>
+                        <td class="actions">
+                            <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm">Edit</a>
+                            <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">
+                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<% } else { %>
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-state-icon">&#9673;</div>
+            <h3>No customers found</h3>
+            <% if (search || statusFilter || tierFilter) { %>
+                <p>No customers match your search criteria. Try adjusting your filters.</p>
+                <a href="/customers" class="btn btn-secondary">Clear Filters</a>
+            <% } else { %>
+                <p>Get started by adding your first customer profile.</p>
+                <a href="/customers/new" class="btn btn-primary">Add Customer</a>
+            <% } %>
+        </div>
+    </div>
+</div>
+<% } %>
+
+<script>
+var toast = document.getElementById('toast');
+if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+</script>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<%- include('partials/head', { title: 'Distribution Logs' }) %>
+<%- include('partials/nav', { currentPage: 'logs' }) %>
+
+<% if (success) { %>
+<div class="toast toast-success" id="toast"><%= success %></div>
+<% } %>
+<% if (error) { %>
+<div class="toast toast-error" id="toast"><%= error %></div>
+<% } %>
+
+<div class="page-header">
+    <div>
+        <h1>Distribution Logs</h1>
+        <div class="subtitle">Audit trail of all publication notifications &mdash; <%= logs.length %> record(s)</div>
+    </div>
+</div>
+
+<!-- Toolbar -->
+<div class="table-toolbar">
+    <form method="GET" action="/logs" class="toolbar-search">
+        <input type="text" name="search" placeholder="Search by publication, recipient, company, or email..." value="<%= search %>" class="search-input">
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+        <% if (search || urgencyFilter) { %>
+            <a href="/logs" class="btn btn-secondary btn-sm">Clear</a>
+        <% } %>
+    </form>
+    <div class="filter-group">
+        <span class="filter-label">Urgency:</span>
+        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Critical/Safety" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
+        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=High" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
+        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Standard" class="filter-pill <%= urgencyFilter === 'Standard' ? 'active' : '' %>">Standard</a>
+        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Informational" class="filter-pill <%= urgencyFilter === 'Informational' ? 'active' : '' %>">Info</a>
+    </div>
+    <div class="refresh-controls">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload();" title="Refresh now">&#8635; Refresh</button>
+        <label class="auto-refresh-toggle">
+            <input type="checkbox" id="autoRefreshToggle"> Auto (30s)
+        </label>
+    </div>
+</div>
+
+<% if (logs.length > 0) { %>
+<div class="card">
+    <div class="card-body" style="padding: 0;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Publication</th>
+                        <th>Type</th>
+                        <th>Urgency</th>
+                        <th>Recipient</th>
+                        <th>Company</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% logs.forEach(function(log) { %>
+                    <tr>
+                        <td style="white-space: nowrap;"><%= new Date(log.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %><br><span class="text-muted"><%= new Date(log.sent_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) %></span></td>
+                        <td><strong><%= log.publication_number %></strong><br><span class="text-muted"><%= log.publication_title %></span></td>
+                        <td><%= log.content_type %></td>
+                        <td>
+                            <span class="badge badge-<%= log.urgency === 'Critical/Safety' ? 'critical' : log.urgency === 'High' ? 'high' : log.urgency === 'Standard' ? 'standard' : 'informational' %>">
+                                <%= log.urgency %>
+                            </span>
+                        </td>
+                        <td><%= log.recipient_name %></td>
+                        <td><%= log.recipient_company %></td>
+                        <td><%= log.recipient_email %></td>
+                        <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<% } else { %>
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-state-icon">&#9776;</div>
+            <h3>No distribution logs found</h3>
+            <% if (search || urgencyFilter) { %>
+                <p>No logs match your search criteria.</p>
+                <a href="/logs" class="btn btn-secondary">Clear Filters</a>
+            <% } else { %>
+                <p>Logs will appear here after publications are distributed to customers.</p>
+                <a href="/publications" class="btn btn-primary">View Publications</a>
+            <% } %>
+        </div>
+    </div>
+</div>
+<% } %>
+
+<script>
+// Toast auto-dismiss
+var toast = document.getElementById('toast');
+if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+
+// Auto-refresh functionality
+var autoRefreshInterval = null;
+var autoRefreshToggle = document.getElementById('autoRefreshToggle');
+
+if (localStorage.getItem('logsAutoRefresh') === 'true') {
+    autoRefreshToggle.checked = true;
+    startAutoRefresh();
+}
+
+autoRefreshToggle.addEventListener('change', function() {
+    if (this.checked) {
+        localStorage.setItem('logsAutoRefresh', 'true');
+        startAutoRefresh();
+    } else {
+        localStorage.setItem('logsAutoRefresh', 'false');
+        stopAutoRefresh();
+    }
+});
+
+function startAutoRefresh() {
+    stopAutoRefresh();
+    autoRefreshInterval = setInterval(function() { location.reload(); }, 30000);
+}
+function stopAutoRefresh() {
+    if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+}
+</script>
+
+</main>
+</div>
+</body>
+</html>

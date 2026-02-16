@@ -1,0 +1,247 @@
+<%- include('partials/head', { title: publication ? 'Edit Publication' : 'Upload Publication' }) %>
+<%- include('partials/nav', { currentPage: 'publications' }) %>
+
+<div class="page-header">
+    <div>
+        <h1><%= publication ? 'Edit' : 'Upload New' %> Publication</h1>
+        <div class="subtitle">Add publication metadata for automated distribution</div>
+    </div>
+</div>
+
+<form action="<%= publication ? '/publications/' + publication.id : '/publications' %>" method="POST" enctype="multipart/form-data">
+<div class="form-container">
+    <!-- Section 1: Publication Details -->
+    <div class="form-section">
+        <div class="form-section-title">Publication Details</div>
+        <div class="form-section-desc">Basic information about this publication</div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="required">Document Title</label>
+                <input type="text" name="title" required value="<%= publication ? publication.title : '' %>" placeholder="Enter document title">
+            </div>
+            <div class="form-group">
+                <label class="required">Publication Number</label>
+                <input type="text" name="publication_number" required value="<%= publication ? publication.publication_number : '' %>" placeholder="e.g., SB-2026-0058">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="required">Author Name</label>
+                <input type="text" name="author_name" required value="<%= publication ? publication.author_name : '' %>" placeholder="Author's full name">
+            </div>
+            <div class="form-group">
+                <label>Reviewer</label>
+                <input type="text" name="reviewer" value="<%= publication ? (publication.reviewer || '') : '' %>" placeholder="Reviewer's name (optional)">
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 2: Classification -->
+    <div class="form-section">
+        <div class="form-section-title">Classification</div>
+        <div class="form-section-desc">Tag this publication for automated matching to customer profiles</div>
+
+        <!-- Products -->
+        <div class="form-group">
+            <div class="checkbox-group-header">
+                <label class="required">Products</label>
+                <a href="#" class="select-all-toggle" data-group="products">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.products.forEach(function(product) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="products" value="<%= product %>" <%= publication && publication.products && publication.products.includes(product) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= product %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage product options</a>
+        </div>
+
+        <!-- Markets -->
+        <div class="form-group mt-3">
+            <div class="checkbox-group-header">
+                <label class="required">Markets</label>
+                <a href="#" class="select-all-toggle" data-group="markets">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.markets.forEach(function(market) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="markets" value="<%= market %>" <%= publication && publication.markets && publication.markets.includes(market) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= market %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage market options</a>
+        </div>
+
+        <!-- Content Type -->
+        <div class="form-group mt-3">
+            <label class="required">Content Type</label>
+            <select name="content_type" required>
+                <option value="">Select Content Type</option>
+                <% metadata.content_types.forEach(function(ct) { if (ct !== 'All Content Types') { %>
+                <option value="<%= ct %>" <%= publication && publication.content_type === ct ? 'selected' : '' %>><%= ct %></option>
+                <% } }); %>
+            </select>
+        </div>
+
+        <!-- Regions -->
+        <div class="form-group mt-3">
+            <div class="checkbox-group-header">
+                <label class="required">Regions</label>
+                <a href="#" class="select-all-toggle" data-group="regions">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.regions.forEach(function(region) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="regions" value="<%= region %>" <%= publication && publication.regions && publication.regions.includes(region) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= region %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage region options</a>
+        </div>
+
+        <!-- Urgency -->
+        <div class="form-group mt-3">
+            <label class="required">Urgency</label>
+            <select name="urgency" required id="urgencySelect">
+                <% ['Critical/Safety', 'High', 'Standard', 'Informational'].forEach(function(u) { %>
+                <option value="<%= u %>" <%= publication && publication.urgency === u ? 'selected' : '' %>><%= u %></option>
+                <% }); %>
+            </select>
+            <div class="help-text" id="urgencyHelp">Critical/Safety: All subscription tiers notified immediately</div>
+        </div>
+    </div>
+
+    <!-- Section 3: Content -->
+    <div class="form-section">
+        <div class="form-section-title">Content</div>
+        <div class="form-section-desc">Summary and action items for the notification email</div>
+
+        <div class="form-group">
+            <label class="required">Summary</label>
+            <textarea name="summary" required placeholder="2-3 sentence description for the notification email"><%= publication ? publication.summary : '' %></textarea>
+            <div class="help-text">This will appear in the body of the notification email</div>
+        </div>
+        <div class="form-group">
+            <label>Action Required</label>
+            <textarea name="action_required" placeholder="What the customer needs to do (optional)"><%= publication ? (publication.action_required || '') : '' %></textarea>
+            <div class="help-text">If populated, this will be highlighted in the email</div>
+        </div>
+    </div>
+
+    <!-- Section 4: Document Upload -->
+    <div class="form-section">
+        <div class="form-section-title">Document Upload</div>
+        <div class="form-section-desc">Attach the publication file</div>
+
+        <% if (publication && publication.file_name) { %>
+        <div class="file-current">Current file: <strong><%= publication.file_name %></strong> (upload a new file to replace)</div>
+        <% } %>
+
+        <div class="file-upload-area" id="dropZone">
+            <div class="file-upload-icon">&#128196;</div>
+            <div class="file-upload-text"><strong>Click to upload</strong> or drag and drop</div>
+            <div class="file-upload-hint">PDF, DOC, or DOCX</div>
+            <input type="file" id="document" name="document" accept=".pdf,.doc,.docx" class="file-input-hidden">
+            <div id="fileSelected" class="file-selected hidden"></div>
+        </div>
+    </div>
+
+    <!-- Form Actions -->
+    <div class="form-actions">
+        <a href="/publications" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg"><%= publication ? 'Update' : 'Upload' %> Publication</button>
+    </div>
+</div>
+</form>
+
+<script>
+// Select All / Deselect All toggles
+document.querySelectorAll('.select-all-toggle').forEach(function(toggle) {
+    toggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        var group = this.dataset.group;
+        var checkboxes = document.querySelectorAll('input[name="' + group + '"]');
+        var allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
+        checkboxes.forEach(function(cb) { cb.checked = !allChecked; });
+        this.textContent = allChecked ? 'Select All' : 'Deselect All';
+    });
+});
+
+// "All" option logic
+function setupAllToggle(allValue, groupName) {
+    var allCheckbox = document.querySelector('input[name="' + groupName + '"][value="' + allValue + '"]');
+    if (!allCheckbox) return;
+    var others = document.querySelectorAll('input[name="' + groupName + '"]:not([value="' + allValue + '"])');
+    allCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            others.forEach(function(cb) { cb.checked = false; cb.closest('.checkbox-card').classList.add('disabled'); });
+        } else {
+            others.forEach(function(cb) { cb.closest('.checkbox-card').classList.remove('disabled'); });
+        }
+    });
+    others.forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            if (this.checked) {
+                allCheckbox.checked = false;
+                others.forEach(function(o) { o.closest('.checkbox-card').classList.remove('disabled'); });
+            }
+        });
+    });
+    if (allCheckbox.checked) {
+        others.forEach(function(cb) { cb.checked = false; cb.closest('.checkbox-card').classList.add('disabled'); });
+    }
+}
+setupAllToggle('All Products', 'products');
+setupAllToggle('All Markets', 'markets');
+setupAllToggle('Global', 'regions');
+
+// File upload area
+var dropZone = document.getElementById('dropZone');
+var fileInput = document.getElementById('document');
+var fileSelected = document.getElementById('fileSelected');
+if (dropZone) {
+    dropZone.addEventListener('click', function() { fileInput.click(); });
+    dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
+    dropZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            showFileName(e.dataTransfer.files[0].name);
+        }
+    });
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length) showFileName(fileInput.files[0].name);
+    });
+}
+function showFileName(name) {
+    fileSelected.textContent = 'Selected: ' + name;
+    fileSelected.classList.remove('hidden');
+}
+
+// Urgency help text
+var urgencyHelp = {
+    'Critical/Safety': 'All subscription tiers notified immediately',
+    'High': 'Standard and Comprehensive tiers notified',
+    'Standard': 'Standard and Comprehensive tiers notified',
+    'Informational': 'Comprehensive tier only'
+};
+var urgencySelect = document.getElementById('urgencySelect');
+var urgencyHelpEl = document.getElementById('urgencyHelp');
+if (urgencySelect) {
+    urgencySelect.addEventListener('change', function() {
+        urgencyHelpEl.textContent = this.value + ': ' + (urgencyHelp[this.value] || '');
+    });
+}
+</script>
+
+</main>
+</div>
+</body>
+</html>

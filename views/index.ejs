@@ -1,0 +1,144 @@
+<%- include('partials/head', { title: 'Dashboard' }) %>
+<%- include('partials/nav', { currentPage: 'home' }) %>
+
+<div class="page-header">
+    <div>
+        <h1>Dashboard</h1>
+        <div class="subtitle">Overview of your publication distribution system</div>
+    </div>
+    <div class="actions">
+        <a href="/customers/new" class="btn btn-secondary">Add Customer</a>
+        <a href="/publications/new" class="btn btn-primary">Upload Publication</a>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid">
+    <div class="stat-card primary">
+        <div class="stat-value"><%= stats.activeCustomers %></div>
+        <div class="stat-label">Active Customers</div>
+        <div class="stat-sub"><%= stats.totalCustomers %> total</div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-value"><%= stats.totalPublications %></div>
+        <div class="stat-label">Publications</div>
+        <div class="stat-sub">Total uploaded</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="stat-value"><%= stats.distributedPublications %></div>
+        <div class="stat-label">Distributed</div>
+        <div class="stat-sub">Publications sent</div>
+    </div>
+    <div class="stat-card info">
+        <div class="stat-value"><%= stats.totalLogs %></div>
+        <div class="stat-label">Notifications Sent</div>
+        <div class="stat-sub">Total emails</div>
+    </div>
+</div>
+
+<!-- Content Grid -->
+<div class="dashboard-grid">
+    <!-- Recent Publications -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Publications</h3>
+            <a href="/publications" class="btn btn-secondary btn-sm">View All</a>
+        </div>
+        <div class="card-body" style="padding: 0;">
+            <% if (recentPublications.length > 0) { %>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pub #</th>
+                            <th>Title</th>
+                            <th>Type</th>
+                            <th>Urgency</th>
+                            <th>Status</th>
+                            <th>Recipients</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% recentPublications.forEach(function(pub) { %>
+                        <tr>
+                            <td><strong><%= pub.publication_number %></strong></td>
+                            <td><%= pub.title %></td>
+                            <td><%= pub.content_type %></td>
+                            <td>
+                                <span class="badge badge-<%= pub.urgency === 'Critical/Safety' ? 'critical' : pub.urgency === 'High' ? 'high' : pub.urgency === 'Standard' ? 'standard' : 'informational' %>">
+                                    <%= pub.urgency %>
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge badge-<%= pub.distribution_status.toLowerCase() %>">
+                                    <%= pub.distribution_status %>
+                                </span>
+                            </td>
+                            <td><%= pub.recipients_count || 0 %></td>
+                        </tr>
+                        <% }); %>
+                    </tbody>
+                </table>
+            </div>
+            <% } else { %>
+            <div class="empty-state">
+                <div class="empty-state-icon">&#9639;</div>
+                <h3>No publications yet</h3>
+                <p>Upload your first publication to get started.</p>
+                <a href="/publications/new" class="btn btn-primary">Upload Publication</a>
+            </div>
+            <% } %>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Activity</h3>
+            <a href="/logs" class="btn btn-secondary btn-sm">View All</a>
+        </div>
+        <div class="card-body">
+            <% if (recentLogs.length > 0) { %>
+                <% recentLogs.forEach(function(log) { %>
+                <div class="activity-item">
+                    <div>
+                        <span class="activity-name"><%= log.recipient_name %></span>
+                        received
+                        <span class="activity-pub"><%= log.publication_number %></span>
+                    </div>
+                    <div class="activity-time"><%= new Date(log.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) %></div>
+                </div>
+                <% }); %>
+            <% } else { %>
+            <div class="empty-state" style="padding: 30px 10px;">
+                <p>No activity yet</p>
+            </div>
+            <% } %>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Links -->
+<div class="quick-links">
+    <a href="/customers" class="quick-link">
+        <span class="quick-link-icon">&#9673;</span>
+        <span class="quick-link-text">Manage Customers</span>
+    </a>
+    <a href="/publications/new" class="quick-link">
+        <span class="quick-link-icon">&#9639;</span>
+        <span class="quick-link-text">Upload Publication</span>
+    </a>
+    <a href="/logs" class="quick-link">
+        <span class="quick-link-icon">&#9776;</span>
+        <span class="quick-link-text">View Logs</span>
+    </a>
+    <a href="/settings" class="quick-link">
+        <span class="quick-link-icon">&#9881;</span>
+        <span class="quick-link-text">Settings</span>
+    </a>
+</div>
+
+</main>
+</div>
+</body>
+</html>

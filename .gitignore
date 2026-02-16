@@ -1,0 +1,7 @@
+node_modules/
+.env
+publications.db
+uploads/
+.claude/
+*.log
+.DS_Store

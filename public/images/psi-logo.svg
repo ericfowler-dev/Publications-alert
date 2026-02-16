@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 48" fill="none">
+  <!-- Gear/cog icon representing industrial/engineering -->
+  <g transform="translate(24, 24)">
+    <!-- Outer gear ring -->
+    <circle cx="0" cy="0" r="11" stroke="white" stroke-width="2.5" fill="none"/>
+    <!-- Inner hub -->
+    <circle cx="0" cy="0" r="4.5" fill="white"/>
+    <!-- Gear teeth (8 teeth) -->
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(0)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(45)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(90)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(135)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(180)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(225)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(270)"/>
+    <rect x="-2" y="-16" width="4" height="5" rx="1" fill="white" transform="rotate(315)"/>
+  </g>
+  <!-- PSI text -->
+  <text x="48" y="33" font-family="Inter, Arial, Helvetica, sans-serif" font-size="26" font-weight="800" fill="white" letter-spacing="3">PSI</text>
+  <!-- Green accent underline -->
+  <rect x="48" y="38" width="68" height="2.5" rx="1.25" fill="#4CAF50"/>
+</svg>

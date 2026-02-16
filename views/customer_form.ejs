@@ -1,0 +1,223 @@
+<%- include('partials/head', { title: customer ? 'Edit Customer' : 'Add Customer' }) %>
+<%- include('partials/nav', { currentPage: 'customers' }) %>
+
+<div class="page-header">
+    <div>
+        <h1><%= customer ? 'Edit' : 'Add' %> Customer Profile</h1>
+        <div class="subtitle">Configure customer subscription preferences for automated distribution</div>
+    </div>
+</div>
+
+<form action="<%= customer ? '/customers/' + customer.id : '/customers' %>" method="POST">
+<div class="form-container">
+    <!-- Section 1: Contact Information -->
+    <div class="form-section">
+        <div class="form-section-title">Contact Information</div>
+        <div class="form-section-desc">Primary contact details for this customer</div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label class="required">Contact Name</label>
+                <input type="text" name="contact_name" required value="<%= customer ? customer.contact_name : '' %>" placeholder="Full name">
+            </div>
+            <div class="form-group">
+                <label class="required">Company</label>
+                <input type="text" name="company" required value="<%= customer ? customer.company : '' %>" placeholder="Company name">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="required">Customer ID</label>
+                <input type="text" name="customer_id" required value="<%= customer ? customer.customer_id : '' %>" placeholder="e.g., PSI-10045">
+                <div class="help-text">PSI ERP/CRM customer number</div>
+            </div>
+            <div class="form-group">
+                <label class="required">Email</label>
+                <input type="email" name="email" required value="<%= customer ? customer.email : '' %>" placeholder="primary@email.com">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>CC Emails</label>
+            <input type="text" name="cc_emails" value="<%= customer ? (customer.cc_emails || '') : '' %>" placeholder="additional@email.com, another@email.com">
+            <div class="help-text">Additional notification emails, comma-separated</div>
+        </div>
+    </div>
+
+    <!-- Section 2: Subscription Profile -->
+    <div class="form-section">
+        <div class="form-section-title">Subscription Profile</div>
+        <div class="form-section-desc">Select the products, markets, content types, and regions this customer should receive notifications for</div>
+
+        <!-- Products -->
+        <div class="form-group">
+            <div class="checkbox-group-header">
+                <label class="required">Products</label>
+                <a href="#" class="select-all-toggle" data-group="products">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.products.forEach(function(product) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="products" value="<%= product %>" <%= customer && customer.products && customer.products.includes(product) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= product %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage product options</a>
+        </div>
+
+        <!-- Markets -->
+        <div class="form-group mt-3">
+            <div class="checkbox-group-header">
+                <label class="required">Markets</label>
+                <a href="#" class="select-all-toggle" data-group="markets">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.markets.forEach(function(market) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="markets" value="<%= market %>" <%= customer && customer.markets && customer.markets.includes(market) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= market %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage market options</a>
+        </div>
+
+        <!-- Content Types -->
+        <div class="form-group mt-3">
+            <div class="checkbox-group-header">
+                <label class="required">Content Types</label>
+                <a href="#" class="select-all-toggle" data-group="content_types">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.content_types.forEach(function(ct) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="content_types" value="<%= ct %>" <%= customer && customer.content_types && customer.content_types.includes(ct) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= ct %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage content type options</a>
+        </div>
+
+        <!-- Regions -->
+        <div class="form-group mt-3">
+            <div class="checkbox-group-header">
+                <label class="required">Regions</label>
+                <a href="#" class="select-all-toggle" data-group="regions">Select All</a>
+            </div>
+            <div class="checkbox-grid">
+                <% metadata.regions.forEach(function(region) { %>
+                <label class="checkbox-card">
+                    <input type="checkbox" name="regions" value="<%= region %>" <%= customer && customer.regions && customer.regions.includes(region) ? 'checked' : '' %>>
+                    <span class="checkbox-label"><%= region %></span>
+                </label>
+                <% }); %>
+            </div>
+            <a href="/settings" class="manage-link">Manage region options</a>
+        </div>
+    </div>
+
+    <!-- Section 3: Account Settings -->
+    <div class="form-section">
+        <div class="form-section-title">Account Settings</div>
+        <div class="form-section-desc">Subscription tier and notification preferences</div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Customer Type</label>
+                <select name="customer_type">
+                    <% ['OEM', 'Distributor', 'Dealer', 'End User', 'Internal'].forEach(function(type) { %>
+                    <option value="<%= type %>" <%= customer && customer.customer_type === type ? 'selected' : '' %>><%= type %></option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="required">Subscription Tier</label>
+                <select name="subscription_tier" required>
+                    <option value="Essential" <%= customer && customer.subscription_tier === 'Essential' ? 'selected' : '' %>>Essential</option>
+                    <option value="Standard" <%= customer && customer.subscription_tier === 'Standard' ? 'selected' : '' %>>Standard</option>
+                    <option value="Comprehensive" <%= customer && customer.subscription_tier === 'Comprehensive' ? 'selected' : '' %>>Comprehensive</option>
+                </select>
+                <div class="help-text">Essential = Critical/Safety only | Standard = High + Standard | Comprehensive = All urgency levels</div>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Preferred Frequency</label>
+                <select name="preferred_frequency">
+                    <option value="Immediate" <%= customer && customer.preferred_frequency === 'Immediate' ? 'selected' : '' %>>Immediate</option>
+                    <option value="Daily Digest" <%= customer && customer.preferred_frequency === 'Daily Digest' ? 'selected' : '' %>>Daily Digest</option>
+                    <option value="Weekly Digest" <%= customer && customer.preferred_frequency === 'Weekly Digest' ? 'selected' : '' %>>Weekly Digest</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="required">Status</label>
+                <select name="status" required>
+                    <option value="Active" <%= customer && customer.status === 'Active' ? 'selected' : '' %>>Active</option>
+                    <option value="Inactive" <%= customer && customer.status === 'Inactive' ? 'selected' : '' %>>Inactive</option>
+                    <option value="Suspended" <%= customer && customer.status === 'Suspended' ? 'selected' : '' %>>Suspended</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form Actions -->
+    <div class="form-actions">
+        <a href="/customers" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary btn-lg"><%= customer ? 'Update' : 'Create' %> Customer</button>
+    </div>
+</div>
+</form>
+
+<script>
+// Select All / Deselect All toggles
+document.querySelectorAll('.select-all-toggle').forEach(function(toggle) {
+    toggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        var group = this.dataset.group;
+        var checkboxes = document.querySelectorAll('input[name="' + group + '"]');
+        var allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
+        checkboxes.forEach(function(cb) { cb.checked = !allChecked; });
+        this.textContent = allChecked ? 'Select All' : 'Deselect All';
+    });
+});
+
+// "All" option logic
+function setupAllToggle(allValue, groupName) {
+    var allCheckbox = document.querySelector('input[name="' + groupName + '"][value="' + allValue + '"]');
+    if (!allCheckbox) return;
+    var others = document.querySelectorAll('input[name="' + groupName + '"]:not([value="' + allValue + '"])');
+
+    allCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            others.forEach(function(cb) { cb.checked = false; cb.closest('.checkbox-card').classList.add('disabled'); });
+        } else {
+            others.forEach(function(cb) { cb.closest('.checkbox-card').classList.remove('disabled'); });
+        }
+    });
+
+    others.forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            if (this.checked) {
+                allCheckbox.checked = false;
+                others.forEach(function(o) { o.closest('.checkbox-card').classList.remove('disabled'); });
+            }
+        });
+    });
+
+    // Init on load
+    if (allCheckbox.checked) {
+        others.forEach(function(cb) { cb.checked = false; cb.closest('.checkbox-card').classList.add('disabled'); });
+    }
+}
+
+setupAllToggle('All Products', 'products');
+setupAllToggle('All Markets', 'markets');
+setupAllToggle('All Content Types', 'content_types');
+setupAllToggle('Global', 'regions');
+</script>
+
+</main>
+</div>
+</body>
+</html>

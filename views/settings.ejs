@@ -1,0 +1,230 @@
+<%- include('partials/head', { title: 'Settings' }) %>
+<%- include('partials/nav', { currentPage: 'settings' }) %>
+
+<% if (success) { %>
+<div class="toast toast-success" id="toast"><%= success %></div>
+<% } %>
+<% if (error) { %>
+<div class="toast toast-error" id="toast"><%= error %></div>
+<% } %>
+
+<div class="page-header">
+    <div>
+        <h1>Settings</h1>
+        <div class="subtitle">Manage system metadata and taxonomy. Changes here affect the options available in customer and publication forms.</div>
+    </div>
+</div>
+
+<div class="settings-grid">
+    <!-- Products -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Products</h3>
+            <span class="badge"><%= metadata.products.length %> items</span>
+        </div>
+        <div class="card-body">
+            <form action="/settings/metadata" method="POST">
+                <input type="hidden" name="category" value="product">
+                <div class="input-group">
+                    <input type="text" name="value" placeholder="Add new product..." required class="input-group-field">
+                    <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                </div>
+            </form>
+            <div class="metadata-list">
+                <% metadata.products.forEach(function(item) { %>
+                <div class="metadata-item" data-id="<%= item.id %>">
+                    <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
+                    <div class="metadata-actions">
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="up">
+                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
+                        </form>
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="down">
+                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
+                        </form>
+                        <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
+                        <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
+                            <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
+                        </form>
+                    </div>
+                </div>
+                <% }); %>
+            </div>
+        </div>
+    </div>
+
+    <!-- Markets -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Markets</h3>
+            <span class="badge"><%= metadata.markets.length %> items</span>
+        </div>
+        <div class="card-body">
+            <form action="/settings/metadata" method="POST">
+                <input type="hidden" name="category" value="market">
+                <div class="input-group">
+                    <input type="text" name="value" placeholder="Add new market..." required class="input-group-field">
+                    <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                </div>
+            </form>
+            <div class="metadata-list">
+                <% metadata.markets.forEach(function(item) { %>
+                <div class="metadata-item" data-id="<%= item.id %>">
+                    <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
+                    <div class="metadata-actions">
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="up">
+                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
+                        </form>
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="down">
+                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
+                        </form>
+                        <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
+                        <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
+                            <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
+                        </form>
+                    </div>
+                </div>
+                <% }); %>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Types -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Content Types</h3>
+            <span class="badge"><%= metadata.content_types.length %> items</span>
+        </div>
+        <div class="card-body">
+            <form action="/settings/metadata" method="POST">
+                <input type="hidden" name="category" value="content_type">
+                <div class="input-group">
+                    <input type="text" name="value" placeholder="Add new content type..." required class="input-group-field">
+                    <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                </div>
+            </form>
+            <div class="metadata-list">
+                <% metadata.content_types.forEach(function(item) { %>
+                <div class="metadata-item" data-id="<%= item.id %>">
+                    <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
+                    <div class="metadata-actions">
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="up">
+                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
+                        </form>
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="down">
+                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
+                        </form>
+                        <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
+                        <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
+                            <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
+                        </form>
+                    </div>
+                </div>
+                <% }); %>
+            </div>
+        </div>
+    </div>
+
+    <!-- Regions -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Regions</h3>
+            <span class="badge"><%= metadata.regions.length %> items</span>
+        </div>
+        <div class="card-body">
+            <form action="/settings/metadata" method="POST">
+                <input type="hidden" name="category" value="region">
+                <div class="input-group">
+                    <input type="text" name="value" placeholder="Add new region..." required class="input-group-field">
+                    <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                </div>
+            </form>
+            <div class="metadata-list">
+                <% metadata.regions.forEach(function(item) { %>
+                <div class="metadata-item" data-id="<%= item.id %>">
+                    <span class="metadata-value" id="val-<%= item.id %>"><%= item.value %></span>
+                    <div class="metadata-actions">
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="up">
+                            <button type="submit" class="btn-ghost" title="Move up">&#9650;</button>
+                        </form>
+                        <form action="/settings/metadata/<%= item.id %>/reorder" method="POST" style="display:inline;">
+                            <input type="hidden" name="direction" value="down">
+                            <button type="submit" class="btn-ghost" title="Move down">&#9660;</button>
+                        </form>
+                        <button type="button" class="btn-ghost" title="Edit" data-value="<%= item.value %>" onclick="startEdit(<%= item.id %>, this.dataset.value)">&#9998;</button>
+                        <form action="/settings/metadata/<%= item.id %>/delete" method="POST" style="display:inline;" onsubmit="return confirm('Remove this value?')">
+                            <button type="submit" class="btn-danger-ghost" title="Remove">&times;</button>
+                        </form>
+                    </div>
+                </div>
+                <% }); %>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Toast auto-dismiss
+var toast = document.getElementById('toast');
+if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+
+// Inline editing
+function startEdit(id, currentValue) {
+    var span = document.getElementById('val-' + id);
+    var parent = span.closest('.metadata-item');
+    var actionsDiv = parent.querySelector('.metadata-actions');
+
+    span.style.display = 'none';
+    actionsDiv.style.display = 'none';
+
+    var editForm = document.createElement('form');
+    editForm.action = '/settings/metadata/' + id + '/edit';
+    editForm.method = 'POST';
+    editForm.style.display = 'flex';
+    editForm.style.flex = '1';
+    editForm.style.gap = '6px';
+    editForm.style.alignItems = 'center';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.name = 'value';
+    input.value = currentValue;
+    input.required = true;
+    input.className = 'input-group-field';
+    input.style.flex = '1';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.className = 'btn btn-primary btn-sm';
+    saveBtn.textContent = 'Save';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-secondary btn-sm';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = function() {
+        editForm.remove();
+        span.style.display = '';
+        actionsDiv.style.display = '';
+    };
+
+    editForm.appendChild(input);
+    editForm.appendChild(saveBtn);
+    editForm.appendChild(cancelBtn);
+    parent.insertBefore(editForm, actionsDiv);
+
+    input.focus();
+    input.select();
+}
+</script>
+
+</main>
+</div>
+</body>
+</html>
