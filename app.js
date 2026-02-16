@@ -1,10 +1,12 @@
 require('dotenv').config();
 const express = require('express');
+const session = require('express-session');
 const sqlite3 = require('sqlite3').verbose();
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -177,6 +179,94 @@ app.use(express.json());
 app.use(express.static('public'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+// Session setup
+app.use(session({
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Auth middleware — protects all admin routes
+function requireAuth(req, res, next) {
+  if (req.session && req.session.authenticated) {
+    return next();
+  }
+  res.redirect('/login');
+}
+
+// Login routes (public)
+app.get('/login', (req, res) => {
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - PSI Publications</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body style="background: var(--gray-50); display: flex; align-items: center; justify-content: center; min-height: 100vh;">
+  <div style="width: 100%; max-width: 400px; padding: 20px;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <img src="/images/psi-logo.svg" alt="PSI" style="height: 48px; margin-bottom: 12px;">
+      <h1 style="font-size: 20px; font-weight: 700; color: var(--gray-900); margin: 0;">Admin Login</h1>
+      <p style="font-size: 13px; color: var(--gray-500); margin: 6px 0 0;">Publication Distribution System</p>
+    </div>
+    ${req.query.error ? '<div style="background: var(--danger-light); color: #721c24; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; text-align: center;">Invalid username or password</div>' : ''}
+    <div class="form-container">
+      <form action="/login" method="POST" style="padding: 24px;">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" name="username" required autocomplete="username" placeholder="Enter username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" name="password" required autocomplete="current-password" placeholder="Enter password">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">Sign In</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>`);
+});
+
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+  const adminUser = process.env.ADMIN_USER || 'admin';
+  const adminPass = process.env.ADMIN_PASS || 'changeme';
+
+  if (username === adminUser && password === adminPass) {
+    req.session.authenticated = true;
+    res.redirect('/');
+  } else {
+    res.redirect('/login?error=1');
+  }
+});
+
+app.get('/logout', (req, res) => {
+  req.session.destroy();
+  res.redirect('/login');
+});
+
+// Protect all admin routes
+app.use((req, res, next) => {
+  // Public routes that don't need auth
+  const publicPaths = ['/login', '/subscribe', '/unsubscribe', '/health'];
+  if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '?'))) {
+    return next();
+  }
+  // Static assets are already served above
+  requireAuth(req, res, next);
+});
 
 // File upload setup - persistent disk on Render, local in development
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/data/uploads' : 'uploads';
