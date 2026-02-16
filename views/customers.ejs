@@ -14,6 +14,7 @@
         <div class="subtitle"><%= customers.length %> customer(s) found</div>
     </div>
     <div class="actions">
+        <a href="/customers/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= statusFilter ? 'status=' + encodeURIComponent(statusFilter) + '&' : '' %><%= tierFilter ? 'tier=' + encodeURIComponent(tierFilter) : '' %>" class="btn btn-secondary">&#128196; Export .xlsx</a>
         <a href="/customers/new" class="btn btn-primary">Add Customer</a>
     </div>
 </div>

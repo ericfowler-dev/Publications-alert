@@ -7,6 +7,7 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const ExcelJS = require('exceljs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -371,6 +372,73 @@ app.get('/customers', async (req, res) => {
   } catch (err) {
     console.error('Customers error:', err);
     res.status(500).send('Server error');
+  }
+});
+
+app.get('/customers/export', async (req, res) => {
+  try {
+    const { search, status, tier } = req.query;
+    let sql = 'SELECT * FROM customers WHERE 1=1';
+    const params = [];
+    if (search) {
+      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s);
+    }
+    if (status) { sql += ' AND status = ?'; params.push(status); }
+    if (tier) { sql += ' AND subscription_tier = ?'; params.push(tier); }
+    sql += ' ORDER BY company, contact_name';
+    const customers = await dbAll(sql, params);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Customers');
+
+    sheet.columns = [
+      { header: 'Customer ID', key: 'customer_id', width: 16 },
+      { header: 'Contact Name', key: 'contact_name', width: 22 },
+      { header: 'Company', key: 'company', width: 24 },
+      { header: 'Email', key: 'email', width: 28 },
+      { header: 'CC Emails', key: 'cc_emails', width: 28 },
+      { header: 'Type', key: 'customer_type', width: 14 },
+      { header: 'Subscription Tier', key: 'subscription_tier', width: 18 },
+      { header: 'Status', key: 'status', width: 10 },
+      { header: 'Products', key: 'products', width: 30 },
+      { header: 'Markets', key: 'markets', width: 24 },
+      { header: 'Content Types', key: 'content_types', width: 24 },
+      { header: 'Regions', key: 'regions', width: 20 },
+      { header: 'Date Added', key: 'date_added', width: 18 },
+      { header: 'Last Notified', key: 'last_notified', width: 18 }
+    ];
+
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+
+    customers.forEach(c => {
+      sheet.addRow({
+        customer_id: c.customer_id,
+        contact_name: c.contact_name,
+        company: c.company,
+        email: c.email,
+        cc_emails: c.cc_emails || '',
+        customer_type: c.customer_type || '',
+        subscription_tier: c.subscription_tier || '',
+        status: c.status || '',
+        products: c.products || '',
+        markets: c.markets || '',
+        content_types: c.content_types || '',
+        regions: c.regions || '',
+        date_added: c.date_added ? new Date(c.date_added).toLocaleDateString() : '',
+        last_notified: c.last_notified ? new Date(c.last_notified).toLocaleDateString() : ''
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=customers-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Customer export error:', err);
+    res.status(500).send('Export failed');
   }
 });
 
@@ -811,8 +879,31 @@ app.get('/logs', async (req, res) => {
     sql += ' ORDER BY sent_date DESC';
 
     const logs = await dbAll(sql, params);
+
+    // Group logs by distribution event (same publication_number + same sent_date rounded to the minute)
+    const groups = [];
+    const groupMap = {};
+    logs.forEach(log => {
+      const dateKey = log.sent_date ? log.sent_date.substring(0, 16) : 'unknown'; // YYYY-MM-DDTHH:MM
+      const key = log.publication_number + '|' + dateKey;
+      if (!groupMap[key]) {
+        groupMap[key] = {
+          key,
+          publication_number: log.publication_number,
+          publication_title: log.publication_title,
+          content_type: log.content_type,
+          urgency: log.urgency,
+          sent_date: log.sent_date,
+          entries: []
+        };
+        groups.push(groupMap[key]);
+      }
+      groupMap[key].entries.push(log);
+    });
+
     res.render('logs', {
       logs,
+      groups,
       search: search || '',
       urgencyFilter: urgency || '',
       success: req.query.success || '',
@@ -821,6 +912,86 @@ app.get('/logs', async (req, res) => {
   } catch (err) {
     console.error('Logs error:', err);
     res.status(500).send('Server error');
+  }
+});
+
+// Delete selected log entries
+app.post('/logs/delete-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'No log entries selected' });
+    }
+    const placeholders = ids.map(() => '?').join(',');
+    await dbRun(`DELETE FROM distribution_logs WHERE id IN (${placeholders})`, ids);
+    res.json({ success: true, count: ids.length });
+  } catch (err) {
+    console.error('Delete logs error:', err);
+    res.status(500).json({ error: 'Failed to delete logs' });
+  }
+});
+
+// Export logs to Excel
+app.get('/logs/export', async (req, res) => {
+  try {
+    const { search, urgency } = req.query;
+    let sql = 'SELECT * FROM distribution_logs WHERE 1=1';
+    const params = [];
+    if (search) {
+      sql += ' AND (publication_number LIKE ? OR publication_title LIKE ? OR recipient_name LIKE ? OR recipient_company LIKE ? OR recipient_email LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s, s, s);
+    }
+    if (urgency) {
+      sql += ' AND urgency = ?';
+      params.push(urgency);
+    }
+    sql += ' ORDER BY sent_date DESC';
+    const logs = await dbAll(sql, params);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Distribution Logs');
+
+    sheet.columns = [
+      { header: 'Date', key: 'sent_date', width: 20 },
+      { header: 'Publication #', key: 'publication_number', width: 16 },
+      { header: 'Title', key: 'publication_title', width: 35 },
+      { header: 'Type', key: 'content_type', width: 18 },
+      { header: 'Urgency', key: 'urgency', width: 14 },
+      { header: 'Recipient', key: 'recipient_name', width: 22 },
+      { header: 'Company', key: 'recipient_company', width: 22 },
+      { header: 'Email', key: 'recipient_email', width: 28 },
+      { header: 'Status', key: 'delivery_status', width: 12 },
+      { header: 'Match Reason', key: 'match_reason', width: 20 }
+    ];
+
+    // Style header row
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    logs.forEach(log => {
+      sheet.addRow({
+        sent_date: log.sent_date ? new Date(log.sent_date).toLocaleString() : '',
+        publication_number: log.publication_number,
+        publication_title: log.publication_title,
+        content_type: log.content_type,
+        urgency: log.urgency,
+        recipient_name: log.recipient_name,
+        recipient_company: log.recipient_company,
+        recipient_email: log.recipient_email,
+        delivery_status: log.delivery_status,
+        match_reason: log.match_reason || ''
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=distribution-logs-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Export error:', err);
+    res.status(500).send('Export failed');
   }
 });
 

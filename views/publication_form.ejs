@@ -109,10 +109,10 @@
             <label class="required">Urgency</label>
             <select name="urgency" required id="urgencySelect">
                 <% ['Critical/Safety', 'High', 'Standard', 'Informational'].forEach(function(u) { %>
-                <option value="<%= u %>" <%= publication && publication.urgency === u ? 'selected' : '' %>><%= u %></option>
+                <option value="<%= u %>" <%= publication ? (publication.urgency === u ? 'selected' : '') : (u === 'Standard' ? 'selected' : '') %>><%= u %></option>
                 <% }); %>
             </select>
-            <div class="help-text" id="urgencyHelp">Critical/Safety: All subscription tiers notified immediately</div>
+            <div class="help-text" id="urgencyHelp">Standard: Essential and All Announcements tiers notified</div>
         </div>
     </div>
 
