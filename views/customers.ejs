@@ -14,8 +14,8 @@
         <div class="subtitle"><%= customers.length %> customer(s) found</div>
     </div>
     <div class="actions">
-        <a href="/customers/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= statusFilter ? 'status=' + encodeURIComponent(statusFilter) + '&' : '' %><%= tierFilter ? 'tier=' + encodeURIComponent(tierFilter) : '' %>" class="btn btn-secondary">&#128196; Export .xlsx</a>
-        <a href="/customers/new" class="btn btn-primary">Add Customer</a>
+        <a href="/customers/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= statusFilter ? 'status=' + encodeURIComponent(statusFilter) + '&' : '' %><%= tierFilter ? 'tier=' + encodeURIComponent(tierFilter) : '' %>" class="btn btn-secondary"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
+        <a href="/customers/new" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add Customer</a>
     </div>
 </div>
 
@@ -84,9 +84,9 @@
                         <td><span class="badge badge-<%= customer.subscription_tier ? customer.subscription_tier.toLowerCase() : '' %>"><%= customer.subscription_tier %></span></td>
                         <td><span class="badge badge-<%= customer.status.toLowerCase() %>"><%= customer.status %></span></td>
                         <td class="actions">
-                            <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm">Edit</a>
+                            <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit customer"><i class="bi bi-pencil"></i> Edit</a>
                             <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">
-                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                <button type="submit" class="btn btn-danger btn-sm" data-bs-toggle="tooltip" title="Delete customer"><i class="bi bi-trash"></i></button>
                             </form>
                         </td>
                     </tr>
@@ -100,7 +100,7 @@
 <div class="card">
     <div class="card-body">
         <div class="empty-state">
-            <div class="empty-state-icon">&#9673;</div>
+            <div class="empty-state-icon"><i class="bi bi-people"></i></div>
             <h3>No customers found</h3>
             <% if (search || statusFilter || tierFilter) { %>
                 <p>No customers match your search criteria. Try adjusting your filters.</p>
@@ -117,6 +117,7 @@
 <script>
 var toast = document.getElementById('toast');
 if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
 </script>
 
 </main>

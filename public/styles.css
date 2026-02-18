@@ -38,6 +38,31 @@
   --sidebar-width: 260px;
 }
 
+/* ============================================================
+   Bootstrap Overrides — keep PSI green theme
+   ============================================================ */
+:root {
+  --bs-primary: #43A047;
+  --bs-primary-rgb: 67, 160, 71;
+  --bs-success: #28a745;
+  --bs-success-rgb: 40, 167, 69;
+  --bs-link-color: #43A047;
+  --bs-link-hover-color: #2E7D32;
+  --bs-body-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --bs-body-font-size: 14px;
+}
+/* Prevent Bootstrap from overriding our custom component classes */
+.btn-primary { background-color: var(--primary) !important; border-color: var(--primary) !important; }
+.btn-primary:hover { background-color: var(--primary-light) !important; border-color: var(--primary-light) !important; }
+.btn-success { background-color: var(--success) !important; border-color: var(--success) !important; }
+.btn-outline-primary { color: var(--primary) !important; border-color: var(--primary) !important; }
+.btn-outline-primary:hover { background-color: var(--primary) !important; color: white !important; }
+.form-control:focus, .form-select:focus { border-color: var(--primary) !important; box-shadow: 0 0 0 0.2rem rgba(67,160,71,0.25) !important; }
+.form-check-input:checked { background-color: var(--primary) !important; border-color: var(--primary) !important; }
+
+/* Bootstrap tooltip customization */
+.tooltip { font-family: 'Inter', sans-serif; font-size: 12px; }
+
 /* Reset & Base */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 14px; }

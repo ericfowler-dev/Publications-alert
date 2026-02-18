@@ -14,7 +14,7 @@
         <div class="subtitle"><%= publications.length %> publication(s)</div>
     </div>
     <div class="actions">
-        <a href="/publications/new" class="btn btn-primary">Upload New Publication</a>
+        <a href="/publications/new" class="btn btn-primary"><i class="bi bi-cloud-upload"></i> Upload New Publication</a>
     </div>
 </div>
 
@@ -85,15 +85,15 @@
                         <td><%= pub.date_published ? new Date(pub.date_published).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' %></td>
                         <td class="actions">
                             <% if (pub.distribution_status === 'Draft') { %>
-                                <a href="/publications/<%= pub.id %>/distribute" class="btn btn-success btn-sm">Distribute</a>
+                                <a href="/publications/<%= pub.id %>/distribute" class="btn btn-success btn-sm" data-bs-toggle="tooltip" title="Preview & distribute"><i class="bi bi-send"></i> Distribute</a>
                             <% } %>
-                            <a href="/publications/<%= pub.id %>/edit" class="btn btn-secondary btn-sm">Edit</a>
+                            <a href="/publications/<%= pub.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit publication"><i class="bi bi-pencil"></i> Edit</a>
                             <% if (pub.file_path) { %>
-                                <a href="/publications/<%= pub.id %>/download" class="btn btn-primary btn-sm">Download</a>
+                                <a href="/publications/<%= pub.id %>/download" class="btn btn-primary btn-sm" data-bs-toggle="tooltip" title="Download document"><i class="bi bi-download"></i></a>
                             <% } %>
                             <% if (pub.distribution_status === 'Draft') { %>
                                 <form action="/publications/<%= pub.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this publication? This cannot be undone.')">
-                                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                    <button type="submit" class="btn btn-danger btn-sm" data-bs-toggle="tooltip" title="Delete publication"><i class="bi bi-trash"></i></button>
                                 </form>
                             <% } %>
                         </td>
@@ -108,7 +108,7 @@
 <div class="card">
     <div class="card-body">
         <div class="empty-state">
-            <div class="empty-state-icon">&#9639;</div>
+            <div class="empty-state-icon"><i class="bi bi-file-earmark-text"></i></div>
             <h3>No publications found</h3>
             <% if (search || statusFilter || urgencyFilter) { %>
                 <p>No publications match your search criteria.</p>
@@ -125,6 +125,8 @@
 <script>
 var toast = document.getElementById('toast');
 if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+// Init Bootstrap tooltips
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
 </script>
 
 </main>

@@ -5,28 +5,28 @@
     </div>
     <div class="sidebar-nav">
         <a href="/" class="<%= currentPage === 'home' ? 'active' : '' %>">
-            <span class="nav-icon">&#8962;</span>
+            <span class="nav-icon"><i class="bi bi-speedometer2"></i></span>
             <span class="nav-text">Dashboard</span>
         </a>
         <a href="/customers" class="<%= currentPage === 'customers' ? 'active' : '' %>">
-            <span class="nav-icon">&#9673;</span>
+            <span class="nav-icon"><i class="bi bi-people"></i></span>
             <span class="nav-text">Customers</span>
         </a>
         <a href="/publications" class="<%= currentPage === 'publications' ? 'active' : '' %>">
-            <span class="nav-icon">&#9639;</span>
+            <span class="nav-icon"><i class="bi bi-file-earmark-text"></i></span>
             <span class="nav-text">Publications</span>
         </a>
         <a href="/logs" class="<%= currentPage === 'logs' ? 'active' : '' %>">
-            <span class="nav-icon">&#9776;</span>
+            <span class="nav-icon"><i class="bi bi-clock-history"></i></span>
             <span class="nav-text">Distribution Logs</span>
         </a>
         <a href="/settings" class="<%= currentPage === 'settings' ? 'active' : '' %>">
-            <span class="nav-icon">&#9881;</span>
+            <span class="nav-icon"><i class="bi bi-gear"></i></span>
             <span class="nav-text">Settings</span>
         </a>
     </div>
     <div class="sidebar-footer">
-        <a href="/logout" style="color: rgba(255,255,255,0.5); font-size: 12px; text-decoration: none;">&#9654; Sign Out</a>
+        <a href="/logout" style="color: rgba(255,255,255,0.5); font-size: 12px; text-decoration: none;"><i class="bi bi-box-arrow-left"></i> Sign Out</a>
         <br><small>&copy; 2026 Power Solutions International &middot; v1.0</small>
     </div>
 </nav>

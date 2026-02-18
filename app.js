@@ -178,6 +178,8 @@ function dbRun(sql, params) {
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
+app.use('/bootstrap', express.static(path.join(__dirname, 'node_modules/bootstrap/dist')));
+app.use('/bootstrap-icons', express.static(path.join(__dirname, 'node_modules/bootstrap-icons')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
@@ -215,6 +217,8 @@ app.get('/login', (req, res) => {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/bootstrap-icons/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body style="background: var(--gray-50); display: flex; align-items: center; justify-content: center; min-height: 100vh;">
@@ -224,18 +228,18 @@ app.get('/login', (req, res) => {
       <h1 style="font-size: 20px; font-weight: 700; color: var(--gray-900); margin: 0;">Admin Login</h1>
       <p style="font-size: 13px; color: var(--gray-500); margin: 6px 0 0;">Publication Distribution System</p>
     </div>
-    ${req.query.error ? '<div style="background: var(--danger-light); color: #721c24; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; text-align: center;">Invalid username or password</div>' : ''}
+    ${req.query.error ? '<div style="background: var(--danger-light); color: #721c24; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; text-align: center;"><i class="bi bi-exclamation-triangle"></i> Invalid username or password</div>' : ''}
     <div class="form-container">
       <form action="/login" method="POST" style="padding: 24px;">
         <div class="form-group">
-          <label>Username</label>
+          <label><i class="bi bi-person"></i> Username</label>
           <input type="text" name="username" required autocomplete="username" placeholder="Enter username">
         </div>
         <div class="form-group">
-          <label>Password</label>
+          <label><i class="bi bi-lock"></i> Password</label>
           <input type="password" name="password" required autocomplete="current-password" placeholder="Enter password">
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">Sign In</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;"><i class="bi bi-box-arrow-in-right"></i> Sign In</button>
       </form>
     </div>
   </div>

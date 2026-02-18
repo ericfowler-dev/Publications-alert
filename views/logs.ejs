@@ -14,7 +14,7 @@
         <div class="subtitle">Audit trail of all publication notifications &mdash; <%= logs.length %> record(s) in <%= groups.length %> event(s)</div>
     </div>
     <div class="page-actions">
-        <a href="/logs/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= urgencyFilter ? 'urgency=' + encodeURIComponent(urgencyFilter) : '' %>" class="btn btn-secondary btn-sm" title="Export to Excel">&#128196; Export .xlsx</a>
+        <a href="/logs/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= urgencyFilter ? 'urgency=' + encodeURIComponent(urgencyFilter) : '' %>" class="btn btn-secondary btn-sm" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
     </div>
 </div>
 
@@ -35,7 +35,7 @@
         <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Informational" class="filter-pill <%= urgencyFilter === 'Informational' ? 'active' : '' %>">Info</a>
     </div>
     <div class="refresh-controls">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload();" title="Refresh now">&#8635; Refresh</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload();" title="Refresh now"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
         <label class="auto-refresh-toggle">
             <input type="checkbox" id="autoRefreshToggle"> Auto (30s)
         </label>
@@ -46,9 +46,9 @@
 <!-- Bulk actions bar -->
 <div id="bulkBar" class="bulk-actions-bar" style="display:none;">
     <span id="selectedCount">0</span> selected &mdash;
-    <button type="button" class="btn btn-primary btn-sm" onclick="bulkResend()">&#8635; Resend Selected</button>
-    <button type="button" class="btn btn-sm" onclick="bulkDelete()" style="background: var(--danger); color: #fff;">&#10005; Delete Selected</button>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="clearSelection()">Clear Selection</button>
+    <button type="button" class="btn btn-primary btn-sm" onclick="bulkResend()"><i class="bi bi-arrow-repeat"></i> Resend Selected</button>
+    <button type="button" class="btn btn-sm" onclick="bulkDelete()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="clearSelection()"><i class="bi bi-x-circle"></i> Clear</button>
 </div>
 
 <% groups.forEach(function(group, gi) { %>
@@ -91,7 +91,7 @@
                     <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
                     <td class="actions">
                         <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
-                            <button type="submit" class="btn btn-secondary btn-sm" title="Resend">&#8635;</button>
+                            <button type="submit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Resend"><i class="bi bi-arrow-repeat"></i></button>
                         </form>
                     </td>
                 </tr>
@@ -106,7 +106,7 @@
 <div class="card">
     <div class="card-body">
         <div class="empty-state">
-            <div class="empty-state-icon">&#9776;</div>
+            <div class="empty-state-icon"><i class="bi bi-clock-history"></i></div>
             <h3>No distribution logs found</h3>
             <% if (search || urgencyFilter) { %>
                 <p>No logs match your search criteria.</p>
@@ -238,6 +238,7 @@ function bulkDelete() {
         }
     });
 }
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
 </script>
 
 </main>
