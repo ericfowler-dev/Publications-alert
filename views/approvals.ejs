@@ -1,0 +1,192 @@
+<%- include('partials/head', { title: 'Subscription Approvals' }) %>
+<%- include('partials/nav', { currentPage: 'approvals' }) %>
+
+<% if (success) { %>
+<div class="toast toast-success" id="toast"><%= success %></div>
+<% } %>
+<% if (error) { %>
+<div class="toast toast-error" id="toast"><%= error %></div>
+<% } %>
+
+<div class="page-header">
+    <div>
+        <h1>Subscription Approvals</h1>
+        <div class="subtitle">Review and approve customer subscription requests</div>
+    </div>
+</div>
+
+<!-- Pending Approvals -->
+<div class="card mb-3">
+    <div class="card-header">
+        <h3><i class="bi bi-hourglass-split"></i> Pending Approval</h3>
+        <span class="badge badge-pending-approval"><%= pending.length %> pending</span>
+    </div>
+    <div class="card-body" style="padding: 0;">
+        <% if (pending.length > 0) { %>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Contact</th>
+                        <th>Company</th>
+                        <th>Email</th>
+                        <th>Type</th>
+                        <th>Tier</th>
+                        <th>Products</th>
+                        <th>Verified</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% pending.forEach(function(customer) { %>
+                    <tr>
+                        <td><strong><%= customer.contact_name %></strong></td>
+                        <td><%= customer.company %></td>
+                        <td>
+                            <%= customer.email %>
+                            <div class="text-muted"><%= customer.email.split('@')[1] %></div>
+                        </td>
+                        <td><span class="badge"><%= customer.customer_type %></span></td>
+                        <td><span class="badge badge-<%= customer.subscription_tier ? customer.subscription_tier.toLowerCase().replace(/ /g, '-') : '' %>"><%= customer.subscription_tier %></span></td>
+                        <td class="tag-cell">
+                            <% if (customer.products) { %>
+                                <% var prods = customer.products.split('; '); prods.slice(0, 2).forEach(function(p) { %>
+                                    <span class="tag"><%= p %></span>
+                                <% }); if (prods.length > 2) { %>
+                                    <span class="tag tag-more">+<%= prods.length - 2 %></span>
+                                <% } %>
+                            <% } else { %>
+                                <span class="text-muted">None</span>
+                            <% } %>
+                        </td>
+                        <td>
+                            <% if (customer.verified_at) { %>
+                                <span class="badge badge-active"><i class="bi bi-check-circle"></i> Yes</span>
+                            <% } else { %>
+                                <span class="badge badge-draft">No</span>
+                            <% } %>
+                        </td>
+                        <td class="actions" style="white-space: nowrap;">
+                            <button type="button" class="btn btn-success btn-sm" onclick="showApprovalModal(<%= customer.id %>, 'approve', '<%= customer.contact_name.replace(/'/g, "\\'") %>')">
+                                <i class="bi bi-check-lg"></i> Approve
+                            </button>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="showApprovalModal(<%= customer.id %>, 'reject', '<%= customer.contact_name.replace(/'/g, "\\'") %>')">
+                                <i class="bi bi-x-lg"></i> Reject
+                            </button>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+        <% } else { %>
+        <div class="empty-state" style="padding: 40px 20px;">
+            <div class="empty-state-icon"><i class="bi bi-check-circle"></i></div>
+            <h3>All caught up!</h3>
+            <p>No subscription requests waiting for approval.</p>
+        </div>
+        <% } %>
+    </div>
+</div>
+
+<!-- Recent Decisions -->
+<% if (recent.length > 0) { %>
+<div class="card">
+    <div class="card-header">
+        <h3><i class="bi bi-clock-history"></i> Recent Decisions</h3>
+    </div>
+    <div class="card-body" style="padding: 0;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Contact</th>
+                        <th>Company</th>
+                        <th>Email</th>
+                        <th>Decision</th>
+                        <th>Notes</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% recent.forEach(function(customer) { %>
+                    <tr>
+                        <td><strong><%= customer.contact_name %></strong></td>
+                        <td><%= customer.company %></td>
+                        <td><%= customer.email %></td>
+                        <td>
+                            <span class="badge badge-<%= customer.status === 'Active' ? 'active' : 'rejected' %>">
+                                <%= customer.status === 'Active' ? 'Approved' : 'Rejected' %>
+                            </span>
+                        </td>
+                        <td><%= customer.approval_notes || '—' %></td>
+                        <td class="text-muted"><%= customer.approved_at ? new Date(customer.approved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' %></td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<% } %>
+
+<!-- Approval/Rejection Modal -->
+<div id="approvalModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; padding:28px; max-width:450px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <h3 id="modalTitle" style="font-size:18px; font-weight:700; margin:0 0 8px;"></h3>
+        <p id="modalDesc" style="font-size:14px; color:#666; margin:0 0 20px;"></p>
+        <form id="modalForm" method="POST">
+            <div class="form-group">
+                <label>Notes (optional)</label>
+                <textarea name="notes" placeholder="Add any notes about this decision..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; min-height:80px; resize:vertical; font-family:inherit;"></textarea>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" id="modalSubmit" class="btn"></button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var toast = document.getElementById('toast');
+if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+
+function showApprovalModal(id, action, name) {
+    var modal = document.getElementById('approvalModal');
+    var form = document.getElementById('modalForm');
+    var title = document.getElementById('modalTitle');
+    var desc = document.getElementById('modalDesc');
+    var submit = document.getElementById('modalSubmit');
+
+    form.action = '/approvals/' + id + '/' + action;
+
+    if (action === 'approve') {
+        title.textContent = 'Approve Subscription';
+        desc.textContent = 'Approve ' + name + "'s subscription? They will receive a confirmation email and begin getting publication notifications.";
+        submit.className = 'btn btn-success';
+        submit.innerHTML = '<i class="bi bi-check-lg"></i> Approve';
+    } else {
+        title.textContent = 'Reject Subscription';
+        desc.textContent = 'Reject ' + name + "'s subscription? They will be notified of the decision.";
+        submit.className = 'btn btn-danger';
+        submit.innerHTML = '<i class="bi bi-x-lg"></i> Reject';
+    }
+
+    modal.style.display = 'flex';
+}
+
+function closeModal() {
+    document.getElementById('approvalModal').style.display = 'none';
+    document.getElementById('modalForm').querySelector('textarea').value = '';
+}
+
+document.getElementById('approvalModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+</script>
+
+</main>
+</div>
+</body>
+</html>

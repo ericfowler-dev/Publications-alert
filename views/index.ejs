@@ -19,11 +19,21 @@
         <div class="stat-label">Active Customers</div>
         <div class="stat-sub"><%= stats.totalCustomers %> total</div>
     </div>
+    <% if (stats.pendingApprovals > 0) { %>
+    <div class="stat-card" style="border-left-color: #e67700; background: #fff8f0;">
+        <a href="/approvals" style="text-decoration: none; color: inherit; display: block;">
+            <div class="stat-value" style="color: #e67700;"><%= stats.pendingApprovals %></div>
+            <div class="stat-label">Pending Approvals</div>
+            <div class="stat-sub" style="color: #e67700; font-weight: 600;">Requires review &rarr;</div>
+        </a>
+    </div>
+    <% } else { %>
     <div class="stat-card success">
         <div class="stat-value"><%= stats.totalPublications %></div>
         <div class="stat-label">Publications</div>
         <div class="stat-sub">Total uploaded</div>
     </div>
+    <% } %>
     <div class="stat-card warning">
         <div class="stat-value"><%= stats.distributedPublications %></div>
         <div class="stat-label">Distributed</div>

@@ -31,8 +31,10 @@
     <div class="filter-group">
         <span class="filter-label">Status:</span>
         <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Active" class="filter-pill <%= statusFilter === 'Active' ? 'active' : '' %>">Active</a>
+        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Pending Approval" class="filter-pill <%= statusFilter === 'Pending Approval' ? 'active' : '' %>">Pending Approval</a>
+        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Pending Verification" class="filter-pill <%= statusFilter === 'Pending Verification' ? 'active' : '' %>">Pending Verification</a>
         <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Inactive" class="filter-pill <%= statusFilter === 'Inactive' ? 'active' : '' %>">Inactive</a>
-        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Suspended" class="filter-pill <%= statusFilter === 'Suspended' ? 'active' : '' %>">Suspended</a>
+        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Rejected" class="filter-pill <%= statusFilter === 'Rejected' ? 'active' : '' %>">Rejected</a>
     </div>
 </div>
 
@@ -82,7 +84,7 @@
                             <% } %>
                         </td>
                         <td><span class="badge badge-<%= customer.subscription_tier ? customer.subscription_tier.toLowerCase() : '' %>"><%= customer.subscription_tier %></span></td>
-                        <td><span class="badge badge-<%= customer.status.toLowerCase() %>"><%= customer.status %></span></td>
+                        <td><span class="badge badge-<%= customer.status.toLowerCase().replace(/ /g, '-') %>"><%= customer.status %></span></td>
                         <td class="actions">
                             <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit customer"><i class="bi bi-pencil"></i> Edit</a>
                             <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">

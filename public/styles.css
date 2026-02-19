@@ -476,6 +476,9 @@ td.actions { white-space: nowrap; text-align: right; }
 .badge-active, .badge-sent, .badge-resent { background: var(--success-light); color: #155724; }
 .badge-inactive, .badge-failed { background: var(--danger-light); color: #721c24; }
 .badge-suspended { background: var(--gray-200); color: var(--gray-600); }
+.badge-pending-verification { background: #fff3cd; color: #856404; }
+.badge-pending-approval { background: #ffe0b2; color: #e65100; }
+.badge-rejected { background: var(--danger-light); color: #721c24; }
 .badge-draft { background: var(--warning-light); color: #856404; }
 .badge-approved { background: var(--info-light); color: #0c5460; }
 .badge-distributed { background: var(--success-light); color: #155724; }

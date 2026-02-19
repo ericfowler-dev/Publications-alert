@@ -90,6 +90,22 @@ function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Customer verification fields
+    db.run("ALTER TABLE customers ADD COLUMN verification_token TEXT", [], () => {});
+    db.run("ALTER TABLE customers ADD COLUMN verification_expires DATETIME", [], () => {});
+    db.run("ALTER TABLE customers ADD COLUMN verified_at DATETIME", [], () => {});
+    db.run("ALTER TABLE customers ADD COLUMN approval_notes TEXT", [], () => {});
+    db.run("ALTER TABLE customers ADD COLUMN approved_by TEXT", [], () => {});
+    db.run("ALTER TABLE customers ADD COLUMN approved_at DATETIME", [], () => {});
+
+    // Domain rules table for allowlist/blocklist
+    db.run(`CREATE TABLE IF NOT EXISTS domain_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain TEXT NOT NULL,
+      rule_type TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     // Migrate old "Comprehensive" tier to "All Announcements"
     db.run("UPDATE customers SET subscription_tier = 'All Announcements' WHERE subscription_tier = 'Comprehensive'");
 
@@ -268,7 +284,7 @@ app.get('/logout', (req, res) => {
 // Protect all admin routes
 app.use((req, res, next) => {
   // Public routes that don't need auth
-  const publicPaths = ['/login', '/subscribe', '/unsubscribe', '/health'];
+  const publicPaths = ['/login', '/subscribe', '/unsubscribe', '/verify', '/health'];
   if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '?'))) {
     return next();
   }
@@ -322,6 +338,8 @@ app.get('/', async (req, res) => {
   try {
     const totalCustomers = (await dbGet('SELECT COUNT(*) as c FROM customers')).c;
     const activeCustomers = (await dbGet("SELECT COUNT(*) as c FROM customers WHERE status = 'Active'")).c;
+    const pendingApprovals = (await dbGet("SELECT COUNT(*) as c FROM customers WHERE status = 'Pending Approval'")).c;
+    const pendingVerification = (await dbGet("SELECT COUNT(*) as c FROM customers WHERE status = 'Pending Verification'")).c;
     const totalPublications = (await dbGet('SELECT COUNT(*) as c FROM publications')).c;
     const distributedPublications = (await dbGet("SELECT COUNT(*) as c FROM publications WHERE distribution_status = 'Distributed'")).c;
     const totalLogs = (await dbGet('SELECT COUNT(*) as c FROM distribution_logs')).c;
@@ -329,7 +347,7 @@ app.get('/', async (req, res) => {
     const recentLogs = await dbAll('SELECT * FROM distribution_logs ORDER BY sent_date DESC LIMIT 10');
 
     res.render('index', {
-      stats: { totalCustomers, activeCustomers, totalPublications, distributedPublications, totalLogs },
+      stats: { totalCustomers, activeCustomers, pendingApprovals, pendingVerification, totalPublications, distributedPublications, totalLogs },
       recentPublications,
       recentLogs
     });
@@ -1076,20 +1094,28 @@ app.post('/logs/resend-bulk', express.json(), async (req, res) => {
 // SETTINGS / METADATA MANAGEMENT
 // ============================================================
 
-app.get('/settings', (req, res) => {
-  db.all('SELECT * FROM metadata ORDER BY category, sort_order, value', [], (err, rows) => {
-    if (err) return res.status(500).send('Database error');
+app.get('/settings', async (req, res) => {
+  try {
+    const rows = await dbAll('SELECT * FROM metadata ORDER BY category, sort_order, value');
     const grouped = { products: [], markets: [], content_types: [], regions: [] };
     (rows || []).forEach(row => {
       const key = row.category === 'product' ? 'products' : row.category === 'market' ? 'markets' : row.category === 'content_type' ? 'content_types' : 'regions';
       grouped[key].push(row);
     });
+    const domainRules = await dbAll('SELECT * FROM domain_rules ORDER BY rule_type, domain');
+    const allowRules = domainRules.filter(r => r.rule_type === 'allow');
+    const blockRules = domainRules.filter(r => r.rule_type === 'block');
     res.render('settings', {
       metadata: grouped,
+      allowRules,
+      blockRules,
       success: req.query.success || '',
       error: req.query.error || ''
     });
-  });
+  } catch (err) {
+    console.error('Settings error:', err);
+    res.status(500).send('Database error');
+  }
 });
 
 app.post('/settings/metadata', async (req, res) => {
@@ -1279,40 +1305,341 @@ app.post('/subscribe', async (req, res) => {
       return res.redirect('/subscribe?error=' + encodeURIComponent('Name, company, and email are required'));
     }
 
+    // Check domain rules (blocklist/allowlist)
+    const emailDomain = email.split('@')[1]?.toLowerCase();
+    if (emailDomain) {
+      const blocked = await dbGet("SELECT id FROM domain_rules WHERE rule_type = 'block' AND LOWER(domain) = ?", [emailDomain]);
+      if (blocked) {
+        return res.redirect('/subscribe?error=' + encodeURIComponent('Subscriptions from this email domain are not permitted. Please contact PSI directly.'));
+      }
+      const allowRules = await dbAll("SELECT domain FROM domain_rules WHERE rule_type = 'allow'");
+      if (allowRules.length > 0) {
+        const isAllowed = allowRules.some(r => r.domain.toLowerCase() === emailDomain);
+        if (!isAllowed) {
+          return res.redirect('/subscribe?error=' + encodeURIComponent('Subscriptions are currently restricted to approved domains. Please contact PSI for access.'));
+        }
+      }
+    }
+
     // Check for existing subscription
     const existing = await dbGet('SELECT * FROM customers WHERE email = ?', [email]);
     if (existing) {
-      if (existing.status === 'Inactive') {
-        // Reactivate
-        await dbRun("UPDATE customers SET status = 'Active', contact_name = ?, company = ?, products = ?, markets = ?, content_types = ?, regions = ?, customer_type = ?, subscription_tier = ?, cc_emails = ? WHERE id = ?",
+      if (existing.status === 'Inactive' || existing.status === 'Rejected') {
+        // Reactivate with new verification
+        const token = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+        await dbRun("UPDATE customers SET status = 'Pending Verification', contact_name = ?, company = ?, products = ?, markets = ?, content_types = ?, regions = ?, customer_type = ?, subscription_tier = ?, cc_emails = ?, verification_token = ?, verification_expires = ?, verified_at = NULL, approved_at = NULL, approval_notes = NULL WHERE id = ?",
           [contact_name, company,
            Array.isArray(products) ? products.join('; ') : (products || ''),
            Array.isArray(markets) ? markets.join('; ') : (markets || ''),
            Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
            Array.isArray(regions) ? regions.join('; ') : (regions || ''),
-           customer_type || 'End User', subscription_tier || 'All Announcements', cc_emails || '', existing.id]);
-        return res.redirect('/subscribe?success=' + encodeURIComponent('Welcome back! Your subscription has been reactivated.'));
+           customer_type || 'End User', subscription_tier || 'All Announcements', cc_emails || '', token, expires, existing.id]);
+        sendVerificationEmail(email, contact_name, token);
+        return res.redirect('/subscribe?success=' + encodeURIComponent('A verification email has been sent to your address. Please check your inbox and click the verification link to continue.'));
+      }
+      if (existing.status === 'Pending Verification') {
+        return res.redirect('/subscribe?error=' + encodeURIComponent('A verification email has already been sent to this address. Please check your inbox.'));
+      }
+      if (existing.status === 'Pending Approval') {
+        return res.redirect('/subscribe?error=' + encodeURIComponent('Your subscription is awaiting admin approval. You will be notified once reviewed.'));
       }
       return res.redirect('/subscribe?error=' + encodeURIComponent('This email is already subscribed. Contact support to update your profile.'));
     }
 
-    // Generate customer ID
+    // Generate customer ID and verification token
     const count = await dbGet('SELECT COUNT(*) as c FROM customers');
     const customerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
-    await dbRun(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
+    await dbRun(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status, verification_token, verification_expires)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Verification', ?, ?)`,
       [contact_name, company, customerId, email, cc_emails || '',
        Array.isArray(products) ? products.join('; ') : (products || ''),
        Array.isArray(markets) ? markets.join('; ') : (markets || ''),
        Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
        Array.isArray(regions) ? regions.join('; ') : (regions || ''),
-       customer_type || 'End User', subscription_tier || 'All Announcements']);
+       customer_type || 'End User', subscription_tier || 'All Announcements', token, expires]);
 
-    res.redirect('/subscribe?success=' + encodeURIComponent('Thank you! You are now subscribed to PSI publication notifications.'));
+    sendVerificationEmail(email, contact_name, token);
+    res.redirect('/subscribe?success=' + encodeURIComponent('A verification email has been sent to your address. Please check your inbox and click the verification link to continue.'));
   } catch (err) {
     console.error('Subscribe error:', err);
     res.redirect('/subscribe?error=' + encodeURIComponent('An error occurred. Please try again.'));
+  }
+});
+
+// Send verification email
+function sendVerificationEmail(email, name, token) {
+  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const verifyUrl = `${baseUrl}/verify?token=${token}`;
+  const fromAddress = process.env.SMTP_FROM || 'publications@psi.com';
+
+  console.log(`VERIFICATION EMAIL: To=${email} URL=${verifyUrl}`);
+
+  const mailOptions = {
+    from: fromAddress,
+    to: email,
+    subject: 'PSI Publications - Verify Your Email Address',
+    html: `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0; padding:0; background-color:#f6f7f9;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f6f7f9;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="550" style="max-width:550px; width:100%; border-collapse:collapse; background-color:#ffffff; border:1px solid #e6e8eb; border-radius:10px; overflow:hidden;">
+          <tr>
+            <td style="padding:18px 22px; background-color:#43A047; color:#ffffff; font-family:Arial, sans-serif;">
+              <div style="font-size:16px; font-weight:700;">POWER SOLUTIONS INTERNATIONAL</div>
+              <div style="font-size:12px; opacity:0.9; margin-top:4px;">Email Verification</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 22px; font-family:Arial, sans-serif; color:#222;">
+              <div style="font-size:16px; font-weight:600; margin:0 0 16px 0;">Hello ${name},</div>
+              <div style="font-size:14px; line-height:1.65; margin:0 0 24px 0;">
+                Thank you for subscribing to PSI Publication Notifications. To complete your registration, please verify your email address by clicking the button below.
+              </div>
+              <div style="text-align:center; margin:0 0 24px 0;">
+                <a href="${verifyUrl}" style="display:inline-block; padding:12px 32px; background-color:#43A047; color:#ffffff; text-decoration:none; border-radius:6px; font-size:14px; font-weight:600;">Verify My Email</a>
+              </div>
+              <div style="font-size:13px; color:#666; line-height:1.55;">
+                This link expires in 48 hours. After verification, your subscription will be reviewed by our team before activation.<br><br>
+                If you did not request this, please ignore this email.
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 22px; background-color:#f3f4f6; font-family:Arial, sans-serif; color:#666; font-size:11px;">
+              &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+  };
+
+  if (transporter) {
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) console.error('Verification email error:', error.message);
+      else console.log('Verification email sent:', info.response);
+    });
+  } else {
+    console.log('  (SMTP not configured - verification email logged only)');
+  }
+}
+
+// Email verification endpoint
+app.get('/verify', async (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.send(verificationResultPage('Invalid Link', 'This verification link is invalid or incomplete.', false));
+  }
+
+  try {
+    const customer = await dbGet('SELECT * FROM customers WHERE verification_token = ?', [token]);
+    if (!customer) {
+      return res.send(verificationResultPage('Invalid Link', 'This verification link is invalid or has already been used.', false));
+    }
+
+    if (customer.verified_at) {
+      const statusMsg = customer.status === 'Active' ? 'Your subscription is already active.'
+        : customer.status === 'Pending Approval' ? 'Your email has already been verified. Your subscription is awaiting admin review.'
+        : 'Your email has already been verified.';
+      return res.send(verificationResultPage('Already Verified', statusMsg, true));
+    }
+
+    if (customer.verification_expires && new Date(customer.verification_expires) < new Date()) {
+      return res.send(verificationResultPage('Link Expired', 'This verification link has expired. Please subscribe again to receive a new verification email.', false));
+    }
+
+    // Mark as verified, move to Pending Approval
+    await dbRun("UPDATE customers SET status = 'Pending Approval', verified_at = datetime('now'), verification_token = NULL WHERE id = ?", [customer.id]);
+
+    res.send(verificationResultPage('Email Verified!', 'Your email address has been verified successfully. Your subscription request will now be reviewed by our team. You will receive a notification once your subscription is approved.', true));
+  } catch (err) {
+    console.error('Verification error:', err);
+    res.send(verificationResultPage('Error', 'An error occurred during verification. Please try again or contact support.', false));
+  }
+});
+
+function verificationResultPage(title, message, success) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title} - PSI Publications</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f6f7f9; margin: 0; padding: 40px 20px; color: #222; }
+    .container { max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; border: 1px solid #e6e8eb; padding: 40px; text-align: center; }
+    h1 { font-size: 20px; color: ${success ? '#43A047' : '#dc3545'}; margin: 0 0 12px; }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    p { font-size: 14px; line-height: 1.6; color: #444; }
+    .footer { margin-top: 20px; font-size: 11px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">${success ? '&#10004;' : '&#10006;'}</div>
+    <h1>${title}</h1>
+    <p>${message}</p>
+    <div class="footer">&copy; ${new Date().getFullYear()} Power Solutions International</div>
+  </div>
+</body>
+</html>`;
+}
+
+// ============================================================
+// ADMIN APPROVAL QUEUE
+// ============================================================
+
+app.get('/approvals', async (req, res) => {
+  try {
+    const pending = await dbAll("SELECT * FROM customers WHERE status = 'Pending Approval' ORDER BY date_added DESC");
+    const recent = await dbAll("SELECT * FROM customers WHERE status IN ('Active', 'Rejected') AND approved_at IS NOT NULL ORDER BY approved_at DESC LIMIT 20");
+    res.render('approvals', { pending, recent, success: req.query.success || '', error: req.query.error || '' });
+  } catch (err) {
+    console.error('Approvals error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+app.post('/approvals/:id/approve', async (req, res) => {
+  try {
+    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    if (!customer) return res.redirect('/approvals?error=' + encodeURIComponent('Customer not found'));
+    const notes = req.body.notes || '';
+    await dbRun("UPDATE customers SET status = 'Active', approval_notes = ?, approved_by = 'admin', approved_at = datetime('now') WHERE id = ?", [notes, req.params.id]);
+    sendApprovalNotification(customer.email, customer.contact_name, true, notes);
+    res.redirect('/approvals?success=' + encodeURIComponent(`Approved subscription for ${customer.contact_name} (${customer.email})`));
+  } catch (err) {
+    console.error('Approve error:', err);
+    res.redirect('/approvals?error=' + encodeURIComponent('Error approving subscription'));
+  }
+});
+
+app.post('/approvals/:id/reject', async (req, res) => {
+  try {
+    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    if (!customer) return res.redirect('/approvals?error=' + encodeURIComponent('Customer not found'));
+    const notes = req.body.notes || '';
+    await dbRun("UPDATE customers SET status = 'Rejected', approval_notes = ?, approved_by = 'admin', approved_at = datetime('now') WHERE id = ?", [notes, req.params.id]);
+    sendApprovalNotification(customer.email, customer.contact_name, false, notes);
+    res.redirect('/approvals?success=' + encodeURIComponent(`Rejected subscription for ${customer.contact_name} (${customer.email})`));
+  } catch (err) {
+    console.error('Reject error:', err);
+    res.redirect('/approvals?error=' + encodeURIComponent('Error rejecting subscription'));
+  }
+});
+
+function sendApprovalNotification(email, name, approved, notes) {
+  const fromAddress = process.env.SMTP_FROM || 'publications@psi.com';
+  const status = approved ? 'Approved' : 'Not Approved';
+  const statusColor = approved ? '#43A047' : '#dc3545';
+  const statusMessage = approved
+    ? 'Your subscription has been approved. You will now receive publication notifications based on your selected preferences.'
+    : 'After reviewing your subscription request, we are unable to approve it at this time.' + (notes ? ' Reason: ' + notes : '');
+
+  console.log(`APPROVAL EMAIL: To=${email} Status=${status}`);
+
+  const mailOptions = {
+    from: fromAddress,
+    to: email,
+    subject: `PSI Publications - Subscription ${status}`,
+    html: `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0; padding:0; background-color:#f6f7f9;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f6f7f9;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="550" style="max-width:550px; width:100%; border-collapse:collapse; background-color:#ffffff; border:1px solid #e6e8eb; border-radius:10px; overflow:hidden;">
+          <tr>
+            <td style="padding:18px 22px; background-color:${statusColor}; color:#ffffff; font-family:Arial, sans-serif;">
+              <div style="font-size:16px; font-weight:700;">POWER SOLUTIONS INTERNATIONAL</div>
+              <div style="font-size:12px; opacity:0.9; margin-top:4px;">Subscription ${status}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 22px; font-family:Arial, sans-serif; color:#222;">
+              <div style="font-size:16px; font-weight:600; margin:0 0 16px 0;">Hello ${name},</div>
+              <div style="font-size:14px; line-height:1.65; margin:0 0 16px 0;">
+                ${statusMessage}
+              </div>
+              <div style="font-size:13px; color:#666; line-height:1.55;">
+                If you have questions, please reply to this email or contact PSI Technical Support.
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 22px; background-color:#f3f4f6; font-family:Arial, sans-serif; color:#666; font-size:11px;">
+              &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+  };
+
+  if (transporter) {
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) console.error('Approval email error:', error.message);
+      else console.log('Approval email sent:', info.response);
+    });
+  } else {
+    console.log('  (SMTP not configured - approval email logged only)');
+  }
+}
+
+// ============================================================
+// DOMAIN RULES (ALLOW/BLOCK LIST)
+// ============================================================
+
+app.get('/settings/domains', async (req, res) => {
+  try {
+    const rules = await dbAll('SELECT * FROM domain_rules ORDER BY rule_type, domain');
+    const allowRules = rules.filter(r => r.rule_type === 'allow');
+    const blockRules = rules.filter(r => r.rule_type === 'block');
+    res.json({ allowRules, blockRules });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load domain rules' });
+  }
+});
+
+app.post('/settings/domain', async (req, res) => {
+  try {
+    const { domain, rule_type } = req.body;
+    if (!domain || !rule_type || !['allow', 'block'].includes(rule_type)) {
+      return res.redirect('/settings?error=' + encodeURIComponent('Valid domain and rule type are required'));
+    }
+    const cleanDomain = domain.trim().toLowerCase().replace(/^@/, '');
+    const existing = await dbGet('SELECT id FROM domain_rules WHERE domain = ? AND rule_type = ?', [cleanDomain, rule_type]);
+    if (existing) {
+      return res.redirect('/settings?error=' + encodeURIComponent('This domain rule already exists'));
+    }
+    await dbRun('INSERT INTO domain_rules (domain, rule_type) VALUES (?, ?)', [cleanDomain, rule_type]);
+    res.redirect('/settings?success=' + encodeURIComponent(`Added ${rule_type} rule for "${cleanDomain}"`));
+  } catch (err) {
+    console.error('Add domain rule error:', err);
+    res.redirect('/settings?error=' + encodeURIComponent('Error adding domain rule'));
+  }
+});
+
+app.post('/settings/domain/:id/delete', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM domain_rules WHERE id = ?', [req.params.id]);
+    res.redirect('/settings?success=' + encodeURIComponent('Domain rule removed'));
+  } catch (err) {
+    res.redirect('/settings?error=' + encodeURIComponent('Error removing domain rule'));
   }
 });
 
