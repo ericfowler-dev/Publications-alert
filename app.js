@@ -198,6 +198,10 @@ app.use(session({
   }
 }));
 
+function getBaseUrl() {
+  return process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
+}
+
 // Auth middleware — protects all admin routes
 function requireAuth(req, res, next) {
   if (req.session && req.session.authenticated) {
@@ -689,6 +693,27 @@ app.post('/publications/:id/distribute', express.json(), async (req, res) => {
   }
 });
 
+// Email preview for a publication (local browser render)
+app.get('/publications/:id/email-preview', async (req, res) => {
+  try {
+    const pub = await dbGet('SELECT * FROM publications WHERE id = ?', [req.params.id]);
+    if (!pub) return res.status(404).send('Publication not found');
+
+    const baseUrl = getBaseUrl();
+    const logoAsset = resolveLogoAsset(baseUrl);
+    const previewEmail = (req.query.email || 'preview@example.com').toString();
+    const html = generateEmailHTML(pub, previewEmail, {
+      baseUrl,
+      logoSrc: logoAsset ? logoAsset.publicUrl : ''
+    });
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    console.error('Email preview error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
 // Download publication
 app.get('/publications/:id/download', (req, res) => {
   db.get('SELECT file_path, file_name FROM publications WHERE id = ?', [req.params.id], (err, row) => {
@@ -732,11 +757,29 @@ function matches(publication, customer) {
   return productMatch && marketMatch && contentTypeMatch && regionMatch && tierMatch;
 }
 
+function resolveLogoAsset(baseUrl) {
+  const logoCandidates = ['PSI FLAG LOGO.jpg', 'psi-logo.svg'];
+  for (const logoName of logoCandidates) {
+    const filePath = path.join(__dirname, 'public', 'images', logoName);
+    if (fs.existsSync(filePath)) {
+      return {
+        fileName: logoName,
+        filePath,
+        publicUrl: `${baseUrl}/images/${encodeURIComponent(logoName)}`
+      };
+    }
+  }
+  return null;
+}
+
 // Send email with document attached
 function sendEmail(publication, customer) {
   const shortTitle = publication.title.length > 50 ? publication.title.substring(0, 50).trim() : publication.title;
   const subject = `PSI ${publication.content_type} ${publication.publication_number} – ${shortTitle}`;
+  const baseUrl = getBaseUrl();
   const fromAddress = process.env.SMTP_FROM || 'publications@psi.com';
+  const logoAsset = resolveLogoAsset(baseUrl);
+  const logoCid = 'psi-logo@psi-publications';
 
   console.log(`EMAIL: To=${customer.email} Subject="${subject}"`);
 
@@ -745,16 +788,36 @@ function sendEmail(publication, customer) {
     to: customer.email,
     cc: customer.cc_emails || undefined,
     subject: subject,
-    html: generateEmailHTML(publication, customer.email)
+    html: generateEmailHTML(publication, customer.email, {
+      baseUrl,
+      logoSrc: logoAsset ? `cid:${logoCid}` : ''
+    })
   };
+
+  const attachments = [];
 
   // Attach the document if a file exists
   if (publication.file_path && fs.existsSync(publication.file_path)) {
-    mailOptions.attachments = [{
+    attachments.push({
       filename: publication.file_name || path.basename(publication.file_path),
       path: publication.file_path
-    }];
-    console.log(`  Attaching: ${mailOptions.attachments[0].filename}`);
+    });
+    console.log(`  Attaching document: ${attachments[attachments.length - 1].filename}`);
+  }
+
+  // Attach logo inline so it renders in email clients
+  if (logoAsset) {
+    attachments.push({
+      filename: logoAsset.fileName,
+      path: logoAsset.filePath,
+      cid: logoCid,
+      contentDisposition: 'inline'
+    });
+    console.log(`  Attaching inline logo: ${logoAsset.fileName}`);
+  }
+
+  if (attachments.length) {
+    mailOptions.attachments = attachments;
   }
 
   if (transporter) {
@@ -771,22 +834,74 @@ function sendEmail(publication, customer) {
 }
 
 // Generate email HTML
-function generateEmailHTML(publication, customerEmail) {
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+function generateEmailHTML(publication, customerEmail, options = {}) {
+  const baseUrl = options.baseUrl || getBaseUrl();
   const releaseDate = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const fileName = publication.file_name || '';
   const unsubscribeUrl = `${baseUrl}/unsubscribe?email=${encodeURIComponent(customerEmail || '')}`;
+  const logoAsset = resolveLogoAsset(baseUrl);
+  const logoSrc = options.logoSrc || (logoAsset ? logoAsset.publicUrl : '');
+
+  const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const formatText = (value) => escapeHtml(value).replace(/\r?\n/g, '<br>');
 
   // Build structured "Applies To" lines
   const productsList = publication.products ? publication.products.split(';').map(p => p.trim()).filter(Boolean) : [];
   const marketsList = publication.markets ? publication.markets.split(';').map(m => m.trim()).filter(Boolean) : [];
   const regionsList = publication.regions ? publication.regions.split(';').map(r => r.trim()).filter(Boolean) : [];
 
+  const urgency = publication.urgency || 'Standard';
+  const urgencyStyleMap = {
+    'Critical/Safety': { bg: '#fdeaea', fg: '#9f1d1d', border: '#f3c5c5', accent: '#c62828', actionBg: '#fff2f0' },
+    'High': { bg: '#fff4e5', fg: '#9a4d00', border: '#f4d7b0', accent: '#d9822b', actionBg: '#fff8ef' },
+    'Standard': { bg: '#e8f5e9', fg: '#1b5e20', border: '#c8e6c9', accent: '#2f7d32', actionBg: '#f3faf4' },
+    'Informational': { bg: '#e9f2ff', fg: '#0b4ea2', border: '#c9dcff', accent: '#1976d2', actionBg: '#f3f8ff' }
+  };
+  const urgencyStyle = urgencyStyleMap[urgency] || urgencyStyleMap.Standard;
+
+  const shortenLabel = (item) => {
+    const raw = String(item || '').trim();
+    if (!raw) return '';
+    const map = {
+      'North America': 'NA',
+      'Latin America': 'LATAM',
+      'Europe, Middle East and Africa': 'EMEA',
+      'Asia Pacific': 'APAC',
+      'All Products': 'All',
+      'All Markets': 'All',
+      'Global': 'Global'
+    };
+    if (map[raw]) return map[raw];
+    return raw.length > 24 ? `${raw.slice(0, 21).trim()}...` : raw;
+  };
+
+  const compactList = (items, maxItems) => {
+    if (!items.length) return 'Not specified';
+    const shortItems = items.map(shortenLabel).filter(Boolean);
+    if (shortItems.includes('All')) return 'All';
+    const shown = shortItems.slice(0, maxItems).join(', ');
+    const remaining = shortItems.length - maxItems;
+    return remaining > 0 ? `${shown} +${remaining} more` : shown;
+  };
+
+  const productsCompact = compactList(productsList, 4);
+  const marketsCompact = compactList(marketsList, 4);
+  const regionsCompact = compactList(regionsList, 4);
+  const pubLabel = `${publication.content_type || ''} ${publication.publication_number || ''}`.trim();
+  const summaryText = publication.summary ? formatText(publication.summary) : 'No summary provided.';
+  const titleText = formatText(publication.title || 'Untitled Publication');
+  const fileLabel = fileName ? formatText(fileName) : '';
+
   const actionBlock = publication.action_required ? `
-                <div style="border-left:4px solid #e67700; background-color:#fff7e6; padding:12px 14px; margin:0 0 16px 0;">
-                  <div style="font-size:14px; line-height:1.55;">
-                    <strong>Action Required</strong><br>
-                    ${publication.action_required}
+                <div style="border-left:4px solid ${urgencyStyle.accent}; background-color:${urgencyStyle.actionBg}; padding:14px 16px; margin:18px 0 16px 0; border-radius:8px;">
+                  <div style="font-size:14px; line-height:1.65; color:#334155;">
+                    <strong style="color:#111827;">Action Required</strong><br>
+                    ${formatText(publication.action_required)}
                   </div>
                 </div>` : '';
 
@@ -795,67 +910,154 @@ function generateEmailHTML(publication, customerEmail) {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PSI ${publication.content_type} ${publication.publication_number}</title>
+    <meta name="x-apple-disable-message-reformatting">
+    <title>PSI ${escapeHtml(pubLabel)}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f3f4f6;
+        font-family: Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+      .email-shell {
+        width: 1120px;
+        max-width: 1120px;
+        border: 1px solid #dbe4ed;
+        border-radius: 14px;
+        overflow: hidden;
+        background: #ffffff;
+      }
+      @media only screen and (max-width: 1140px) {
+        .email-shell {
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+        .main-col, .side-col {
+          display: block !important;
+          width: 100% !important;
+        }
+        .main-col {
+          border-right: 0 !important;
+          border-bottom: 1px solid #e2e8f0 !important;
+        }
+      }
+    </style>
   </head>
-  <body style="margin:0; padding:0; background-color:#f6f7f9;">
+  <body>
     <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent;">
-      ${publication.content_type} ${publication.publication_number}. ${publication.title}.
+      ${escapeHtml(pubLabel)}. ${escapeHtml(publication.title || '')}.
     </div>
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f6f7f9;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f3f4f6;">
       <tr>
-        <td align="center" style="padding:24px 12px;">
-          <table role="presentation" cellpadding="0" cellspacing="0" width="650" style="max-width:650px; width:100%; border-collapse:collapse; background-color:#ffffff; border:1px solid #e6e8eb; border-radius:10px; overflow:hidden;">
+        <td align="center" style="padding:28px 16px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="1120" class="email-shell" style="border-collapse:collapse;">
             <tr>
-              <td style="padding:18px 22px; background-color:#43A047; color:#ffffff; font-family:Arial, sans-serif;">
-                <div style="font-size:16px; font-weight:700; letter-spacing:0.2px;">
-                  POWER SOLUTIONS INTERNATIONAL
-                </div>
-                <div style="font-size:12px; opacity:0.9; margin-top:4px;">
-                  Publication Notification
-                </div>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:22px; font-family:Arial, sans-serif; color:#222;">
-                <div style="font-size:16px; font-weight:700; margin:0 0 10px 0;">
-                  ${publication.content_type} ${publication.publication_number}
-                </div>
-                <div style="font-size:14px; line-height:1.55; margin:0 0 14px 0;">
-                  <strong>Title:</strong> ${publication.title}<br>
-                  <strong>Release Date:</strong> ${releaseDate}<br>
-                  <strong>Priority:</strong> ${publication.urgency}
-                </div>
-                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border:1px solid #e6e8eb; background-color:#fbfbfc; border-radius:8px; border-collapse:collapse; margin:0 0 16px 0;">
+              <td style="padding:22px 28px; background-color:#43a047; color:#ffffff;">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
                   <tr>
-                    <td style="padding:14px; font-family:Arial, sans-serif;">
-                      <div style="font-size:13px; font-weight:700; color:#222; margin:0 0 8px 0;">Applies To</div>
-                      ${productsList.length ? '<div style="font-size:13px; color:#444; line-height:1.55; margin:0 0 4px 0;"><strong>Products:</strong> ' + productsList.join(', ') + '</div>' : ''}
-                      ${marketsList.length ? '<div style="font-size:13px; color:#444; line-height:1.55; margin:0 0 4px 0;"><strong>Markets:</strong> ' + marketsList.join(', ') + '</div>' : ''}
-                      ${regionsList.length ? '<div style="font-size:13px; color:#444; line-height:1.55; margin:0;"><strong>Regions:</strong> ' + regionsList.join(', ') + '</div>' : ''}
+                    <td style="vertical-align:middle; padding-right:12px;">
+                      <div style="font-size:22px; line-height:1.2; font-weight:700; letter-spacing:0.2px; text-transform:uppercase;">
+                        POWER SOLUTIONS INTERNATIONAL
+                      </div>
+                      <div style="font-size:13px; opacity:0.95; margin-top:4px; font-weight:500;">
+                        Publication Notification
+                      </div>
+                    </td>
+                    <td align="right" style="vertical-align:middle; white-space:nowrap;">
+                      ${logoSrc ? `<img src="${logoSrc}" alt="PSI logo" width="148" style="display:block; width:148px; max-width:148px; height:auto; border:0; outline:none; text-decoration:none;">` : ''}
                     </td>
                   </tr>
                 </table>
-                ${publication.summary ? `<div style="font-size:14px; line-height:1.65; margin:0 0 12px 0;">
-                  <strong>Summary</strong><br>
-                  ${publication.summary}
-                </div>` : ''}
-                ${actionBlock}
-                ${fileName ? `<div style="border:1px solid #e6e8eb; background-color:#fbfbfc; border-radius:8px; padding:14px; margin:0 0 16px 0;">
-                  <div style="font-size:13px; color:#444; line-height:1.55;">
-                    <strong>&#128206; Attached Document</strong><br>
-                    ${fileName}
-                  </div>
-                </div>` : ''}
-                <div style="font-size:13px; color:#444; line-height:1.6; margin-top:14px;">
-                  Questions: reply to this email or contact Technical Support.
-                </div>
               </td>
             </tr>
             <tr>
-              <td style="padding:16px 22px; background-color:#f3f4f6; font-family:Arial, sans-serif; color:#666; font-size:11px; line-height:1.5;">
-                You received this notification based on your PSI distribution profile.<br>
-                &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.<br>
-                <a href="${unsubscribeUrl}" style="color:#888; text-decoration:underline;">Unsubscribe</a> from future notifications.
+              <td style="padding:0;">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="main-col" width="69%" style="padding:30px; border-right:1px solid #e2e8f0; vertical-align:top;">
+                      <div style="margin-bottom:22px;">
+                        <div style="font-size:12px; letter-spacing:1.3px; text-transform:uppercase; color:#43a047; font-weight:700; margin-bottom:8px;">
+                          Bulletin ID: ${escapeHtml(pubLabel)}
+                        </div>
+                        <div style="font-size:34px; line-height:1.25; font-weight:700; color:#0f172a;">
+                          ${titleText}
+                        </div>
+                      </div>
+
+                      <div style="font-size:19px; line-height:1.3; font-weight:700; color:#1f2937; margin:0 0 10px 0;">Summary</div>
+                      <div style="font-size:15px; line-height:1.75; color:#475569; margin:0 0 6px 0;">
+                        ${summaryText}
+                      </div>
+
+                      ${actionBlock}
+
+                      ${fileLabel ? `<div style="margin-top:20px; border:1px solid #e2e8f0; background-color:#f8fafc; border-radius:10px; padding:14px 16px;">
+                        <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:#64748b; font-weight:700; margin-bottom:8px;">Attached Documentation</div>
+                        <div style="font-size:14px; color:#0f172a; font-weight:600; line-height:1.45;">
+                          ${fileLabel}
+                        </div>
+                      </div>` : ''}
+
+                      <div style="margin-top:20px; font-size:13px; color:#475569; line-height:1.6;">
+                        Comprehensive details, including affected ranges and remediation guidance, are contained in the attached document.
+                      </div>
+                    </td>
+                    <td class="side-col" width="31%" style="padding:30px; background-color:#f8fafc; vertical-align:top;">
+                      <div style="margin-bottom:20px;">
+                        <div style="font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:#94a3b8; margin-bottom:10px;">Service Details</div>
+                        <div style="padding:0 0 12px 0;">
+                          <div style="font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#64748b; font-weight:700; margin-bottom:4px;">Release Date</div>
+                          <div style="font-size:14px; color:#0f172a; font-weight:600;">${escapeHtml(releaseDate)}</div>
+                        </div>
+                        <div style="font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#64748b; font-weight:700; margin-bottom:6px;">Priority</div>
+                        <span style="display:inline-block; padding:5px 10px; border-radius:999px; font-size:12px; font-weight:700; background-color:${urgencyStyle.bg}; color:${urgencyStyle.fg}; border:1px solid ${urgencyStyle.border};">
+                          ${escapeHtml(urgency)}
+                        </span>
+                      </div>
+
+                      <div style="height:1px; background:#e2e8f0; margin:0 0 20px 0;"></div>
+
+                      <div style="font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:#94a3b8; margin-bottom:10px;">Applies To</div>
+                      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+                        <tr>
+                          <td style="width:62px; padding:0 8px 8px 0; font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">Prod</td>
+                          <td style="padding:0 0 8px 0; font-size:13px; color:#334155; line-height:1.45;">${escapeHtml(productsCompact)}</td>
+                        </tr>
+                        <tr>
+                          <td style="width:62px; padding:0 8px 8px 0; font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">Mkt</td>
+                          <td style="padding:0 0 8px 0; font-size:13px; color:#334155; line-height:1.45;">${escapeHtml(marketsCompact)}</td>
+                        </tr>
+                        <tr>
+                          <td style="width:62px; padding:0 8px 0 0; font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">Reg</td>
+                          <td style="padding:0; font-size:13px; color:#334155; line-height:1.45;">${escapeHtml(regionsCompact)}</td>
+                        </tr>
+                      </table>
+
+                      <div style="margin-top:20px; border-top:1px solid #e2e8f0; padding-top:16px;">
+                        <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#64748b; margin-bottom:8px;">Need Help?</div>
+                        <div style="font-size:12px; color:#475569; line-height:1.55;">
+                          Contact Technical Support or reply directly to this notification.
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 28px; background-color:#f1f5f9; border-top:1px solid #e2e8f0;">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+                  <tr>
+                    <td style="font-size:11px; color:#64748b; line-height:1.55;">
+                      You received this notification based on your PSI distribution profile.<br>
+                      &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.
+                    </td>
+                    <td align="right" style="white-space:nowrap; font-size:11px; color:#64748b;">
+                      <a href="${unsubscribeUrl}" style="color:#4b647d; text-decoration:underline; font-weight:600;">Unsubscribe</a>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
           </table>

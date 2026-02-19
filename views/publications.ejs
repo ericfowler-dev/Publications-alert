@@ -87,6 +87,7 @@
                             <% if (pub.distribution_status === 'Draft') { %>
                                 <a href="/publications/<%= pub.id %>/distribute" class="btn btn-success btn-sm" data-bs-toggle="tooltip" title="Preview & distribute"><i class="bi bi-send"></i> Distribute</a>
                             <% } %>
+                            <a href="/publications/<%= pub.id %>/email-preview" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Preview email in browser"><i class="bi bi-envelope-open"></i></a>
                             <a href="/publications/<%= pub.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit publication"><i class="bi bi-pencil"></i> Edit</a>
                             <% if (pub.file_path) { %>
                                 <a href="/publications/<%= pub.id %>/download" class="btn btn-primary btn-sm" data-bs-toggle="tooltip" title="Download document"><i class="bi bi-download"></i></a>
