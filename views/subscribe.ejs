@@ -71,6 +71,7 @@
                         <option value="End User" selected>End User</option>
                         <option value="Internal">Internal</option>
                     </select>
+                    <div class="help-text" id="subscribeInternalHelp">Internal employees are marked as internal and no customer ID is assigned.</div>
                 </div>
                 <div class="form-group">
                     <label>Subscription Tier</label>
@@ -203,6 +204,23 @@ setupAllToggle('All Products', 'products');
 setupAllToggle('All Markets', 'markets');
 setupAllToggle('All Content Types', 'content_types');
 setupAllToggle('Global', 'regions');
+
+var subscribeTypeSelect = document.querySelector('select[name="customer_type"]');
+var subscribeInternalHelp = document.getElementById('subscribeInternalHelp');
+
+function syncSubscribeInternalHelp() {
+    if (!subscribeTypeSelect || !subscribeInternalHelp) return;
+    if (subscribeTypeSelect.value === 'Internal') {
+        subscribeInternalHelp.textContent = 'Internal Employee selected. This signup will not create a customer ID.';
+    } else {
+        subscribeInternalHelp.textContent = 'Internal employees are marked as internal and no customer ID is assigned.';
+    }
+}
+
+if (subscribeTypeSelect) {
+    subscribeTypeSelect.addEventListener('change', syncSubscribeInternalHelp);
+    syncSubscribeInternalHelp();
+}
 </script>
 
 </body>

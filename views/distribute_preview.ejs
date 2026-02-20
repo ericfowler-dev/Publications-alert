@@ -60,9 +60,18 @@
             </thead>
             <tbody>
                 <% matched.forEach(function(c) { %>
+                <% const matchedIsInternal = (c.customer_type || '').toLowerCase() === 'internal'; %>
                 <tr>
                     <td><input type="checkbox" class="dist-checkbox matched-cb" value="<%= c.id %>" checked></td>
-                    <td><%= c.customer_id %></td>
+                    <td>
+                        <% if (c.customer_id) { %>
+                            <%= c.customer_id %>
+                        <% } else if (matchedIsInternal) { %>
+                            <span class="badge badge-internal">Internal Employee</span>
+                        <% } else { %>
+                            <span class="text-muted">None</span>
+                        <% } %>
+                    </td>
                     <td><%= c.contact_name %></td>
                     <td><%= c.company %></td>
                     <td><%= c.email %></td>
@@ -110,9 +119,18 @@
             </thead>
             <tbody>
                 <% unmatched.forEach(function(c) { %>
+                <% const unmatchedIsInternal = (c.customer_type || '').toLowerCase() === 'internal'; %>
                 <tr>
                     <td><input type="checkbox" class="dist-checkbox unmatched-cb" value="<%= c.id %>"></td>
-                    <td><%= c.customer_id %></td>
+                    <td>
+                        <% if (c.customer_id) { %>
+                            <%= c.customer_id %>
+                        <% } else if (unmatchedIsInternal) { %>
+                            <span class="badge badge-internal">Internal Employee</span>
+                        <% } else { %>
+                            <span class="text-muted">None</span>
+                        <% } %>
+                    </td>
                     <td><%= c.contact_name %></td>
                     <td><%= c.company %></td>
                     <td><%= c.email %></td>

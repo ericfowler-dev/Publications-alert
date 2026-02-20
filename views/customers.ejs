@@ -1,6 +1,35 @@
 <%- include('partials/head', { title: 'Customers' }) %>
 <%- include('partials/nav', { currentPage: 'customers' }) %>
 
+<%
+function customersQuery(overrides) {
+    const params = new URLSearchParams();
+    const searchValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'search') ? overrides.search : search;
+    const statusValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'status') ? overrides.status : statusFilter;
+    const tierValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'tier') ? overrides.tier : tierFilter;
+    const sortValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'sort') ? overrides.sort : sortBy;
+    const dirValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'dir') ? overrides.dir : sortDir;
+
+    if (searchValue) params.set('search', searchValue);
+    if (statusValue) params.set('status', statusValue);
+    if (tierValue) params.set('tier', tierValue);
+    if (sortValue) params.set('sort', sortValue);
+    if (dirValue) params.set('dir', dirValue);
+
+    const query = params.toString();
+    return query ? ('?' + query) : '';
+}
+
+function nextSortDir(column) {
+    return sortBy === column && sortDir === 'asc' ? 'desc' : 'asc';
+}
+
+function sortArrow(column) {
+    if (sortBy !== column) return '';
+    return sortDir === 'asc' ? ' ▲' : ' ▼';
+}
+%>
+
 <% if (success) { %>
 <div class="toast toast-success" id="toast"><%= success %></div>
 <% } %>
@@ -14,50 +43,80 @@
         <div class="subtitle"><%= customers.length %> customer(s) found</div>
     </div>
     <div class="actions">
-        <a href="/customers/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= statusFilter ? 'status=' + encodeURIComponent(statusFilter) + '&' : '' %><%= tierFilter ? 'tier=' + encodeURIComponent(tierFilter) : '' %>" class="btn btn-secondary"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
+        <a href="/customers/export<%= customersQuery({}) %>" class="btn btn-secondary"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
         <a href="/customers/new" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add Customer</a>
     </div>
 </div>
 
-<!-- Toolbar -->
 <div class="table-toolbar">
     <form method="GET" action="/customers" class="toolbar-search">
         <input type="text" name="search" placeholder="Search by name, company, or email..." value="<%= search %>" class="search-input">
+        <input type="hidden" name="status" value="<%= statusFilter %>">
+        <input type="hidden" name="tier" value="<%= tierFilter %>">
+        <input type="hidden" name="sort" value="<%= sortBy %>">
+        <input type="hidden" name="dir" value="<%= sortDir %>">
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
         <% if (search || statusFilter || tierFilter) { %>
-            <a href="/customers" class="btn btn-secondary btn-sm">Clear</a>
+            <a href="/customers<%= customersQuery({ search: '', status: '', tier: '' }) %>" class="btn btn-secondary btn-sm">Clear</a>
         <% } %>
     </form>
     <div class="filter-group">
         <span class="filter-label">Status:</span>
-        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Active" class="filter-pill <%= statusFilter === 'Active' ? 'active' : '' %>">Active</a>
-        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Inactive" class="filter-pill <%= statusFilter === 'Inactive' ? 'active' : '' %>">Inactive</a>
-        <a href="/customers?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Suspended" class="filter-pill <%= statusFilter === 'Suspended' ? 'active' : '' %>">Suspended</a>
+        <a href="/customers<%= customersQuery({ status: 'Active' }) %>" class="filter-pill <%= statusFilter === 'Active' ? 'active' : '' %>">Active</a>
+        <a href="/customers<%= customersQuery({ status: 'Inactive' }) %>" class="filter-pill <%= statusFilter === 'Inactive' ? 'active' : '' %>">Inactive</a>
+        <a href="/customers<%= customersQuery({ status: 'Suspended' }) %>" class="filter-pill <%= statusFilter === 'Suspended' ? 'active' : '' %>">Suspended</a>
     </div>
 </div>
 
 <% if (customers.length > 0) { %>
+<div id="customerBulkBar" class="bulk-actions-bar" style="display:none;">
+    <span><span id="customerSelectedCount">0</span> selected</span>
+    <button type="button" class="btn btn-sm" onclick="bulkDeleteCustomers()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="clearCustomerSelection()"><i class="bi bi-x-circle"></i> Clear</button>
+</div>
+
 <div class="card">
     <div class="card-body" style="padding: 0;">
         <div class="table-container">
             <table>
                 <thead>
                     <tr>
-                        <th>Contact Name</th>
-                        <th>Company</th>
-                        <th>Email</th>
+                        <th style="width: 36px;">
+                            <input type="checkbox" id="selectAllCustomers" title="Select all customers">
+                        </th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'contact_name', dir: nextSortDir('contact_name') }) %>">Contact Name<%= sortArrow('contact_name') %></a></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'company', dir: nextSortDir('company') }) %>">Company<%= sortArrow('company') %></a></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'customer_id', dir: nextSortDir('customer_id') }) %>">Customer ID<%= sortArrow('customer_id') %></a></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'email', dir: nextSortDir('email') }) %>">Email<%= sortArrow('email') %></a></th>
                         <th>Products</th>
                         <th>Markets</th>
-                        <th>Tier</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'subscription_tier', dir: nextSortDir('subscription_tier') }) %>">Tier<%= sortArrow('subscription_tier') %></a></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'status', dir: nextSortDir('status') }) %>">Status<%= sortArrow('status') %></a></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'customer_type', dir: nextSortDir('customer_type') }) %>">Type<%= sortArrow('customer_type') %></a></th>
+                        <th style="width: 120px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <% customers.forEach(function(customer) { %>
+                    <% const isInternal = (customer.customer_type || '').toLowerCase() === 'internal'; %>
                     <tr>
-                        <td><strong><%= customer.contact_name %></strong></td>
+                        <td><input type="checkbox" class="customer-checkbox" value="<%= customer.id %>"></td>
+                        <td>
+                            <strong><%= customer.contact_name %></strong>
+                            <% if (isInternal) { %>
+                                <span class="badge badge-internal" style="margin-left: 6px;">Internal</span>
+                            <% } %>
+                        </td>
                         <td><%= customer.company %></td>
+                        <td>
+                            <% if (customer.customer_id) { %>
+                                <%= customer.customer_id %>
+                            <% } else if (isInternal) { %>
+                                <span class="badge badge-internal">Internal Employee</span>
+                            <% } else { %>
+                                <span class="text-muted">None</span>
+                            <% } %>
+                        </td>
                         <td><%= customer.email %></td>
                         <td class="tag-cell">
                             <% if (customer.products) { %>
@@ -83,6 +142,13 @@
                         </td>
                         <td><span class="badge badge-<%= customer.subscription_tier ? customer.subscription_tier.toLowerCase() : '' %>"><%= customer.subscription_tier %></span></td>
                         <td><span class="badge badge-<%= customer.status.toLowerCase() %>"><%= customer.status %></span></td>
+                        <td>
+                            <% if (isInternal) { %>
+                                <span class="badge badge-internal">Internal</span>
+                            <% } else { %>
+                                <%= customer.customer_type || '-' %>
+                            <% } %>
+                        </td>
                         <td class="actions">
                             <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit customer"><i class="bi bi-pencil"></i> Edit</a>
                             <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">
@@ -116,8 +182,84 @@
 
 <script>
 var toast = document.getElementById('toast');
-if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+if (toast) {
+    setTimeout(function() {
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 5000);
+}
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
+
+var customerBulkBar = document.getElementById('customerBulkBar');
+var customerSelectedCount = document.getElementById('customerSelectedCount');
+var customerSelectAll = document.getElementById('selectAllCustomers');
+
+function getCheckedCustomers() {
+    return Array.from(document.querySelectorAll('.customer-checkbox:checked'));
+}
+
+function updateCustomerSelectionUi() {
+    if (!customerBulkBar || !customerSelectedCount) return;
+    var checked = getCheckedCustomers();
+    customerSelectedCount.textContent = checked.length;
+    customerBulkBar.style.display = checked.length ? 'flex' : 'none';
+
+    if (!customerSelectAll) return;
+    var all = document.querySelectorAll('.customer-checkbox');
+    if (!all.length) {
+        customerSelectAll.checked = false;
+        customerSelectAll.indeterminate = false;
+        return;
+    }
+    customerSelectAll.checked = checked.length === all.length;
+    customerSelectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+}
+
+function clearCustomerSelection() {
+    document.querySelectorAll('.customer-checkbox').forEach(function(cb) { cb.checked = false; });
+    if (customerSelectAll) {
+        customerSelectAll.checked = false;
+        customerSelectAll.indeterminate = false;
+    }
+    updateCustomerSelectionUi();
+}
+
+function bulkDeleteCustomers() {
+    var ids = getCheckedCustomers().map(function(cb) { return parseInt(cb.value, 10); }).filter(function(v) { return Number.isInteger(v); });
+    if (!ids.length) return;
+    if (!confirm('Permanently delete ' + ids.length + ' customer record(s)? This cannot be undone.')) return;
+
+    fetch('/customers/delete-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: ids })
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+          if (data.success) {
+              location.href = '/customers?success=' + encodeURIComponent('Deleted ' + data.count + ' customer record(s)');
+          } else {
+              location.href = '/customers?error=' + encodeURIComponent(data.error || 'Delete failed');
+          }
+      })
+      .catch(function() {
+          location.href = '/customers?error=' + encodeURIComponent('Delete failed');
+      });
+}
+
+if (customerSelectAll) {
+    customerSelectAll.addEventListener('change', function() {
+        document.querySelectorAll('.customer-checkbox').forEach(function(cb) { cb.checked = customerSelectAll.checked; });
+        updateCustomerSelectionUi();
+    });
+}
+
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('customer-checkbox')) {
+        updateCustomerSelectionUi();
+    }
+});
+
+updateCustomerSelectionUi();
 </script>
 
 </main>

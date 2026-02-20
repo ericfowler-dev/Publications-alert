@@ -174,6 +174,12 @@ function dbRun(sql, params) {
   });
 }
 
+function toSortDir(value, fallback = 'asc') {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'asc' || normalized === 'desc') return normalized;
+  return fallback;
+}
+
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -349,14 +355,27 @@ app.get('/', async (req, res) => {
 
 app.get('/customers', async (req, res) => {
   try {
-    const { search, status, tier } = req.query;
+    const { search, status, tier, sort, dir } = req.query;
+    const customerSortColumns = {
+      contact_name: 'contact_name',
+      company: 'company',
+      customer_id: 'customer_id',
+      email: 'email',
+      customer_type: 'customer_type',
+      subscription_tier: 'subscription_tier',
+      status: 'status',
+      date_added: 'date_added'
+    };
+    const sortBy = customerSortColumns[sort] ? sort : 'company';
+    const sortDir = toSortDir(dir, 'asc');
+
     let sql = 'SELECT * FROM customers WHERE 1=1';
     const params = [];
 
     if (search) {
-      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ?)';
+      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ? OR customer_id LIKE ?)';
       const s = `%${search}%`;
-      params.push(s, s, s);
+      params.push(s, s, s, s);
     }
     if (status) {
       sql += ' AND status = ?';
@@ -366,7 +385,7 @@ app.get('/customers', async (req, res) => {
       sql += ' AND subscription_tier = ?';
       params.push(tier);
     }
-    sql += ' ORDER BY company, contact_name';
+    sql += ` ORDER BY ${customerSortColumns[sortBy]} ${sortDir.toUpperCase()}, contact_name ASC`;
 
     const customers = await dbAll(sql, params);
     res.render('customers', {
@@ -374,6 +393,8 @@ app.get('/customers', async (req, res) => {
       search: search || '',
       statusFilter: status || '',
       tierFilter: tier || '',
+      sortBy,
+      sortDir,
       success: req.query.success || '',
       error: req.query.error || ''
     });
@@ -385,17 +406,30 @@ app.get('/customers', async (req, res) => {
 
 app.get('/customers/export', async (req, res) => {
   try {
-    const { search, status, tier } = req.query;
+    const { search, status, tier, sort, dir } = req.query;
+    const customerSortColumns = {
+      contact_name: 'contact_name',
+      company: 'company',
+      customer_id: 'customer_id',
+      email: 'email',
+      customer_type: 'customer_type',
+      subscription_tier: 'subscription_tier',
+      status: 'status',
+      date_added: 'date_added'
+    };
+    const sortBy = customerSortColumns[sort] ? sort : 'company';
+    const sortDir = toSortDir(dir, 'asc');
+
     let sql = 'SELECT * FROM customers WHERE 1=1';
     const params = [];
     if (search) {
-      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ?)';
+      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ? OR customer_id LIKE ?)';
       const s = `%${search}%`;
-      params.push(s, s, s);
+      params.push(s, s, s, s);
     }
     if (status) { sql += ' AND status = ?'; params.push(status); }
     if (tier) { sql += ' AND subscription_tier = ?'; params.push(tier); }
-    sql += ' ORDER BY company, contact_name';
+    sql += ` ORDER BY ${customerSortColumns[sortBy]} ${sortDir.toUpperCase()}, contact_name ASC`;
     const customers = await dbAll(sql, params);
 
     const workbook = new ExcelJS.Workbook();
@@ -423,7 +457,7 @@ app.get('/customers/export', async (req, res) => {
 
     customers.forEach(c => {
       sheet.addRow({
-        customer_id: c.customer_id,
+        customer_id: c.customer_id || ((c.customer_type || '').toLowerCase() === 'internal' ? 'Internal Employee' : ''),
         contact_name: c.contact_name,
         company: c.company,
         email: c.email,
@@ -461,6 +495,13 @@ app.get('/customers/new', async (req, res) => {
 
 app.post('/customers', (req, res) => {
   const { contact_name, company, customer_id, email, cc_emails, customer_type, subscription_tier, preferred_frequency, status } = req.body;
+  const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
+  const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
+  const normalizedCustomerId = isInternalEmployee ? '' : String(customer_id || '').trim();
+  if (!isInternalEmployee && !normalizedCustomerId) {
+    return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
+  }
+
   const products = Array.isArray(req.body.products) ? req.body.products.join('; ') : req.body.products || '';
   const markets = Array.isArray(req.body.markets) ? req.body.markets.join('; ') : req.body.markets || '';
   const content_types = Array.isArray(req.body.content_types) ? req.body.content_types.join('; ') : req.body.content_types || '';
@@ -468,7 +509,7 @@ app.post('/customers', (req, res) => {
 
   db.run(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, preferred_frequency, status)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, preferred_frequency, status],
+    [contact_name, company, normalizedCustomerId, email, cc_emails, products, markets, content_types, regions, normalizedCustomerType, subscription_tier, preferred_frequency, status],
     function(err) {
       if (err) {
         console.error('Create customer error:', err);
@@ -476,6 +517,23 @@ app.post('/customers', (req, res) => {
       }
       res.redirect('/customers?success=' + encodeURIComponent('Customer created successfully'));
     });
+});
+
+app.post('/customers/delete-bulk', express.json(), async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids)
+      ? req.body.ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: 'No customers selected' });
+    }
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await dbRun(`DELETE FROM customers WHERE id IN (${placeholders})`, ids);
+    res.json({ success: true, count: result.changes || ids.length });
+  } catch (err) {
+    console.error('Delete customers error:', err);
+    res.status(500).json({ error: 'Failed to delete customers' });
+  }
 });
 
 app.get('/customers/:id/edit', async (req, res) => {
@@ -492,13 +550,20 @@ app.get('/customers/:id/edit', async (req, res) => {
 app.post('/customers/:id', (req, res) => {
   const id = req.params.id;
   const { contact_name, company, customer_id, email, cc_emails, customer_type, subscription_tier, preferred_frequency, status } = req.body;
+  const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
+  const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
+  const normalizedCustomerId = isInternalEmployee ? '' : String(customer_id || '').trim();
+  if (!isInternalEmployee && !normalizedCustomerId) {
+    return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
+  }
+
   const products = Array.isArray(req.body.products) ? req.body.products.join('; ') : req.body.products || '';
   const markets = Array.isArray(req.body.markets) ? req.body.markets.join('; ') : req.body.markets || '';
   const content_types = Array.isArray(req.body.content_types) ? req.body.content_types.join('; ') : req.body.content_types || '';
   const regions = Array.isArray(req.body.regions) ? req.body.regions.join('; ') : req.body.regions || '';
 
   db.run(`UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, preferred_frequency=?, status=? WHERE id=?`,
-    [contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, preferred_frequency, status, id],
+    [contact_name, company, normalizedCustomerId, email, cc_emails, products, markets, content_types, regions, normalizedCustomerType, subscription_tier, preferred_frequency, status, id],
     function(err) {
       if (err) {
         console.error('Update customer error:', err);
@@ -999,9 +1064,6 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
                         </div>
                       </div>` : ''}
 
-                      <div style="margin-top:20px; font-size:13px; color:#475569; line-height:1.6;">
-                        Comprehensive details, including affected ranges and remediation guidance, are contained in the attached document.
-                      </div>
                     </td>
                     <td class="side-col" width="31%" style="padding:30px; background-color:#f8fafc; vertical-align:top;">
                       <div style="margin-bottom:20px;">
@@ -1081,7 +1143,21 @@ function logDistribution(publication, customer) {
 
 app.get('/logs', async (req, res) => {
   try {
-    const { search, urgency } = req.query;
+    const { search, urgency, sort, dir } = req.query;
+    const logSortColumns = {
+      sent_date: 'sent_date',
+      publication_number: 'publication_number',
+      publication_title: 'publication_title',
+      content_type: 'content_type',
+      urgency: 'urgency',
+      recipient_name: 'recipient_name',
+      recipient_company: 'recipient_company',
+      recipient_email: 'recipient_email',
+      delivery_status: 'delivery_status'
+    };
+    const sortBy = logSortColumns[sort] ? sort : 'sent_date';
+    const sortDir = toSortDir(dir, 'desc');
+
     let sql = 'SELECT * FROM distribution_logs WHERE 1=1';
     const params = [];
 
@@ -1094,7 +1170,7 @@ app.get('/logs', async (req, res) => {
       sql += ' AND urgency = ?';
       params.push(urgency);
     }
-    sql += ' ORDER BY sent_date DESC';
+    sql += ` ORDER BY ${logSortColumns[sortBy]} ${sortDir.toUpperCase()}, id DESC`;
 
     const logs = await dbAll(sql, params);
 
@@ -1124,6 +1200,8 @@ app.get('/logs', async (req, res) => {
       groups,
       search: search || '',
       urgencyFilter: urgency || '',
+      sortBy,
+      sortDir,
       success: req.query.success || '',
       error: req.query.error || ''
     });
@@ -1152,7 +1230,21 @@ app.post('/logs/delete-bulk', express.json(), async (req, res) => {
 // Export logs to Excel
 app.get('/logs/export', async (req, res) => {
   try {
-    const { search, urgency } = req.query;
+    const { search, urgency, sort, dir } = req.query;
+    const logSortColumns = {
+      sent_date: 'sent_date',
+      publication_number: 'publication_number',
+      publication_title: 'publication_title',
+      content_type: 'content_type',
+      urgency: 'urgency',
+      recipient_name: 'recipient_name',
+      recipient_company: 'recipient_company',
+      recipient_email: 'recipient_email',
+      delivery_status: 'delivery_status'
+    };
+    const sortBy = logSortColumns[sort] ? sort : 'sent_date';
+    const sortDir = toSortDir(dir, 'desc');
+
     let sql = 'SELECT * FROM distribution_logs WHERE 1=1';
     const params = [];
     if (search) {
@@ -1164,7 +1256,7 @@ app.get('/logs/export', async (req, res) => {
       sql += ' AND urgency = ?';
       params.push(urgency);
     }
-    sql += ' ORDER BY sent_date DESC';
+    sql += ` ORDER BY ${logSortColumns[sortBy]} ${sortDir.toUpperCase()}, id DESC`;
     const logs = await dbAll(sql, params);
 
     const workbook = new ExcelJS.Workbook();
@@ -1476,6 +1568,8 @@ app.get('/subscribe', async (req, res) => {
 app.post('/subscribe', async (req, res) => {
   try {
     const { contact_name, company, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier } = req.body;
+    const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
+    const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
 
     if (!contact_name || !company || !email) {
       return res.redirect('/subscribe?error=' + encodeURIComponent('Name, company, and email are required'));
@@ -1486,21 +1580,35 @@ app.post('/subscribe', async (req, res) => {
     if (existing) {
       if (existing.status === 'Inactive') {
         // Reactivate
-        await dbRun("UPDATE customers SET status = 'Active', contact_name = ?, company = ?, products = ?, markets = ?, content_types = ?, regions = ?, customer_type = ?, subscription_tier = ?, cc_emails = ? WHERE id = ?",
+        const existingCustomerId = String(existing.customer_id || '').trim();
+        let reactivatedCustomerId = '';
+        if (isInternalEmployee) {
+          reactivatedCustomerId = '';
+        } else if (existingCustomerId) {
+          reactivatedCustomerId = existingCustomerId;
+        } else {
+          const count = await dbGet('SELECT COUNT(*) as c FROM customers');
+          reactivatedCustomerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+        }
+        await dbRun("UPDATE customers SET status = 'Active', contact_name = ?, company = ?, customer_id = ?, products = ?, markets = ?, content_types = ?, regions = ?, customer_type = ?, subscription_tier = ?, cc_emails = ? WHERE id = ?",
           [contact_name, company,
+           reactivatedCustomerId,
            Array.isArray(products) ? products.join('; ') : (products || ''),
            Array.isArray(markets) ? markets.join('; ') : (markets || ''),
            Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
            Array.isArray(regions) ? regions.join('; ') : (regions || ''),
-           customer_type || 'End User', subscription_tier || 'All Announcements', cc_emails || '', existing.id]);
+           normalizedCustomerType, subscription_tier || 'All Announcements', cc_emails || '', existing.id]);
         return res.redirect('/subscribe?success=' + encodeURIComponent('Welcome back! Your subscription has been reactivated.'));
       }
       return res.redirect('/subscribe?error=' + encodeURIComponent('This email is already subscribed. Contact support to update your profile.'));
     }
 
-    // Generate customer ID
-    const count = await dbGet('SELECT COUNT(*) as c FROM customers');
-    const customerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+    let customerId = '';
+    if (!isInternalEmployee) {
+      // Generate customer ID for external self-signups
+      const count = await dbGet('SELECT COUNT(*) as c FROM customers');
+      customerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+    }
 
     await dbRun(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
@@ -1509,7 +1617,7 @@ app.post('/subscribe', async (req, res) => {
        Array.isArray(markets) ? markets.join('; ') : (markets || ''),
        Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
        Array.isArray(regions) ? regions.join('; ') : (regions || ''),
-       customer_type || 'End User', subscription_tier || 'All Announcements']);
+       normalizedCustomerType, subscription_tier || 'All Announcements']);
 
     res.redirect('/subscribe?success=' + encodeURIComponent('Thank you! You are now subscribed to PSI publication notifications.'));
   } catch (err) {

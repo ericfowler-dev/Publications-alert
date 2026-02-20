@@ -27,9 +27,9 @@
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="required">Customer ID</label>
-                <input type="text" name="customer_id" required value="<%= customer ? customer.customer_id : '' %>" placeholder="e.g., PSI-10045">
-                <div class="help-text">PSI ERP/CRM customer number</div>
+                <label id="customerIdLabel" class="required">Customer ID</label>
+                <input type="text" id="customerIdInput" name="customer_id" required value="<%= customer ? customer.customer_id : '' %>" placeholder="e.g., PSI-10045">
+                <div class="help-text" id="customerIdHelp">PSI ERP/CRM customer number (not required for Internal employees)</div>
             </div>
             <div class="form-group">
                 <label class="required">Email</label>
@@ -215,6 +215,33 @@ setupAllToggle('All Products', 'products');
 setupAllToggle('All Markets', 'markets');
 setupAllToggle('All Content Types', 'content_types');
 setupAllToggle('Global', 'regions');
+
+var customerTypeSelect = document.querySelector('select[name="customer_type"]');
+var customerIdInput = document.getElementById('customerIdInput');
+var customerIdLabel = document.getElementById('customerIdLabel');
+var customerIdHelp = document.getElementById('customerIdHelp');
+
+function syncCustomerIdRequirement() {
+    if (!customerTypeSelect || !customerIdInput || !customerIdLabel || !customerIdHelp) return;
+    var isInternal = customerTypeSelect.value === 'Internal';
+    if (isInternal) {
+        customerIdInput.required = false;
+        customerIdInput.value = '';
+        customerIdInput.placeholder = 'Not required for internal employees';
+        customerIdLabel.classList.remove('required');
+        customerIdHelp.textContent = 'Internal employees do not use a customer ID.';
+    } else {
+        customerIdInput.required = true;
+        customerIdInput.placeholder = 'e.g., PSI-10045';
+        customerIdLabel.classList.add('required');
+        customerIdHelp.textContent = 'PSI ERP/CRM customer number (not required for Internal employees)';
+    }
+}
+
+if (customerTypeSelect) {
+    customerTypeSelect.addEventListener('change', syncCustomerIdRequirement);
+    syncCustomerIdRequirement();
+}
 </script>
 
 </main>

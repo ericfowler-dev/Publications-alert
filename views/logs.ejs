@@ -1,6 +1,33 @@
 <%- include('partials/head', { title: 'Distribution Logs' }) %>
 <%- include('partials/nav', { currentPage: 'logs' }) %>
 
+<%
+function logsQuery(overrides) {
+    const params = new URLSearchParams();
+    const searchValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'search') ? overrides.search : search;
+    const urgencyValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'urgency') ? overrides.urgency : urgencyFilter;
+    const sortValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'sort') ? overrides.sort : sortBy;
+    const dirValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'dir') ? overrides.dir : sortDir;
+
+    if (searchValue) params.set('search', searchValue);
+    if (urgencyValue) params.set('urgency', urgencyValue);
+    if (sortValue) params.set('sort', sortValue);
+    if (dirValue) params.set('dir', dirValue);
+
+    const query = params.toString();
+    return query ? ('?' + query) : '';
+}
+
+function nextSortDir(column) {
+    return sortBy === column && sortDir === 'asc' ? 'desc' : 'asc';
+}
+
+function sortArrow(column) {
+    if (sortBy !== column) return '';
+    return sortDir === 'asc' ? ' ▲' : ' ▼';
+}
+%>
+
 <% if (success) { %>
 <div class="toast toast-success" id="toast"><%= success %></div>
 <% } %>
@@ -14,25 +41,27 @@
         <div class="subtitle">Audit trail of all publication notifications &mdash; <%= logs.length %> record(s) in <%= groups.length %> event(s)</div>
     </div>
     <div class="page-actions">
-        <a href="/logs/export?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %><%= urgencyFilter ? 'urgency=' + encodeURIComponent(urgencyFilter) : '' %>" class="btn btn-secondary btn-sm" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
+        <a href="/logs/export<%= logsQuery({}) %>" class="btn btn-secondary btn-sm" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
     </div>
 </div>
 
-<!-- Toolbar -->
 <div class="table-toolbar">
     <form method="GET" action="/logs" class="toolbar-search">
         <input type="text" name="search" placeholder="Search by publication, recipient, company, or email..." value="<%= search %>" class="search-input">
+        <input type="hidden" name="urgency" value="<%= urgencyFilter %>">
+        <input type="hidden" name="sort" value="<%= sortBy %>">
+        <input type="hidden" name="dir" value="<%= sortDir %>">
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
         <% if (search || urgencyFilter) { %>
-            <a href="/logs" class="btn btn-secondary btn-sm">Clear</a>
+            <a href="/logs<%= logsQuery({ search: '', urgency: '' }) %>" class="btn btn-secondary btn-sm">Clear</a>
         <% } %>
     </form>
     <div class="filter-group">
         <span class="filter-label">Urgency:</span>
-        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Critical/Safety" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
-        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=High" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
-        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Standard" class="filter-pill <%= urgencyFilter === 'Standard' ? 'active' : '' %>">Standard</a>
-        <a href="/logs?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Informational" class="filter-pill <%= urgencyFilter === 'Informational' ? 'active' : '' %>">Info</a>
+        <a href="/logs<%= logsQuery({ urgency: 'Critical/Safety' }) %>" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
+        <a href="/logs<%= logsQuery({ urgency: 'High' }) %>" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
+        <a href="/logs<%= logsQuery({ urgency: 'Standard' }) %>" class="filter-pill <%= urgencyFilter === 'Standard' ? 'active' : '' %>">Standard</a>
+        <a href="/logs<%= logsQuery({ urgency: 'Informational' }) %>" class="filter-pill <%= urgencyFilter === 'Informational' ? 'active' : '' %>">Info</a>
     </div>
     <div class="refresh-controls">
         <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload();" title="Refresh now"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
@@ -42,66 +71,63 @@
     </div>
 </div>
 
-<% if (groups.length > 0) { %>
-<!-- Bulk actions bar -->
+<% if (logs.length > 0) { %>
 <div id="bulkBar" class="bulk-actions-bar" style="display:none;">
-    <span id="selectedCount">0</span> selected &mdash;
+    <span><span id="selectedCount">0</span> selected</span>
     <button type="button" class="btn btn-primary btn-sm" onclick="bulkResend()"><i class="bi bi-arrow-repeat"></i> Resend Selected</button>
     <button type="button" class="btn btn-sm" onclick="bulkDelete()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="clearSelection()"><i class="bi bi-x-circle"></i> Clear</button>
 </div>
 
-<% groups.forEach(function(group, gi) { %>
-<div class="card log-group-card" style="margin-bottom: 12px;">
-    <!-- Group Header (clickable) -->
-    <div class="log-group-header" onclick="toggleGroup('<%= gi %>')" style="cursor: pointer;">
-        <div class="log-group-left">
-            <input type="checkbox" class="group-checkbox" data-group="<%= gi %>" onclick="event.stopPropagation(); toggleGroupCheckboxes(<%= gi %>);" title="Select all in this event">
-            <span class="log-group-toggle" id="toggle-<%= gi %>">&#9654;</span>
-            <span class="badge badge-<%= group.urgency === 'Critical/Safety' ? 'critical' : group.urgency === 'High' ? 'high' : group.urgency === 'Standard' ? 'standard' : 'informational' %>"><%= group.urgency %></span>
-            <strong><%= group.publication_number %></strong>
-            <span class="text-muted">&mdash; <%= group.publication_title %></span>
+<div class="card">
+    <div class="card-body" style="padding: 0;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 36px;">
+                            <input type="checkbox" id="selectAllLogs" title="Select all logs">
+                        </th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'sent_date', dir: nextSortDir('sent_date') }) %>">Date<%= sortArrow('sent_date') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'publication_number', dir: nextSortDir('publication_number') }) %>">Publication #<%= sortArrow('publication_number') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'publication_title', dir: nextSortDir('publication_title') }) %>">Title<%= sortArrow('publication_title') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'content_type', dir: nextSortDir('content_type') }) %>">Type<%= sortArrow('content_type') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'urgency', dir: nextSortDir('urgency') }) %>">Urgency<%= sortArrow('urgency') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_name', dir: nextSortDir('recipient_name') }) %>">Recipient<%= sortArrow('recipient_name') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_company', dir: nextSortDir('recipient_company') }) %>">Company<%= sortArrow('recipient_company') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_email', dir: nextSortDir('recipient_email') }) %>">Email<%= sortArrow('recipient_email') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'delivery_status', dir: nextSortDir('delivery_status') }) %>">Status<%= sortArrow('delivery_status') %></a></th>
+                        <th style="width: 70px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% logs.forEach(function(log) { %>
+                    <tr>
+                        <td><input type="checkbox" class="log-checkbox" value="<%= log.id %>"></td>
+                        <td style="white-space: nowrap;">
+                            <%= log.sent_date ? new Date(log.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '' %>
+                            <div class="text-muted"><%= log.sent_date ? new Date(log.sent_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '' %></div>
+                        </td>
+                        <td><strong><%= log.publication_number %></strong></td>
+                        <td><%= log.publication_title %></td>
+                        <td><%= log.content_type %></td>
+                        <td><span class="badge badge-<%= log.urgency === 'Critical/Safety' ? 'critical' : log.urgency === 'High' ? 'high' : log.urgency === 'Standard' ? 'standard' : 'informational' %>"><%= log.urgency %></span></td>
+                        <td><%= log.recipient_name %></td>
+                        <td><%= log.recipient_company %></td>
+                        <td><%= log.recipient_email %></td>
+                        <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
+                        <td class="actions">
+                            <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
+                                <button type="submit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Resend"><i class="bi bi-arrow-repeat"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
         </div>
-        <div class="log-group-right">
-            <span class="text-muted" style="font-size: 12px;"><%= group.content_type %></span>
-            <span class="log-group-count"><%= group.entries.length %> recipient<%= group.entries.length !== 1 ? 's' : '' %></span>
-            <span class="text-muted" style="font-size: 12px; white-space: nowrap;"><%= new Date(group.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %> <%= new Date(group.sent_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) %></span>
-        </div>
-    </div>
-    <!-- Group Detail (collapsed by default) -->
-    <div class="log-group-body" id="group-<%= gi %>" style="display: none;">
-        <table class="log-group-table">
-            <thead>
-                <tr>
-                    <th style="width:36px;"></th>
-                    <th>Recipient</th>
-                    <th>Company</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th style="width:70px;">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <% group.entries.forEach(function(log) { %>
-                <tr>
-                    <td><input type="checkbox" class="log-checkbox" value="<%= log.id %>" data-group="<%= gi %>"></td>
-                    <td><%= log.recipient_name %></td>
-                    <td><%= log.recipient_company %></td>
-                    <td><%= log.recipient_email %></td>
-                    <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
-                    <td class="actions">
-                        <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
-                            <button type="submit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Resend"><i class="bi bi-arrow-repeat"></i></button>
-                        </form>
-                    </td>
-                </tr>
-                <% }); %>
-            </tbody>
-        </table>
     </div>
 </div>
-<% }); %>
-
 <% } else { %>
 <div class="card">
     <div class="card-body">
@@ -121,91 +147,82 @@
 <% } %>
 
 <script>
-// Toast auto-dismiss
 var toast = document.getElementById('toast');
-if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
+if (toast) {
+    setTimeout(function() {
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 5000);
+}
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
 
-// Auto-refresh
 var autoRefreshInterval = null;
 var autoRefreshToggle = document.getElementById('autoRefreshToggle');
-if (localStorage.getItem('logsAutoRefresh') === 'true') {
+if (autoRefreshToggle && localStorage.getItem('logsAutoRefresh') === 'true') {
     autoRefreshToggle.checked = true;
     startAutoRefresh();
 }
-autoRefreshToggle.addEventListener('change', function() {
-    if (this.checked) { localStorage.setItem('logsAutoRefresh', 'true'); startAutoRefresh(); }
-    else { localStorage.setItem('logsAutoRefresh', 'false'); stopAutoRefresh(); }
-});
-function startAutoRefresh() { stopAutoRefresh(); autoRefreshInterval = setInterval(function() { location.reload(); }, 30000); }
-function stopAutoRefresh() { if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; } }
-
-// Toggle group expand/collapse
-function toggleGroup(gi) {
-    var body = document.getElementById('group-' + gi);
-    var toggle = document.getElementById('toggle-' + gi);
-    if (body.style.display === 'none') {
-        body.style.display = 'block';
-        toggle.innerHTML = '&#9660;';
-    } else {
-        body.style.display = 'none';
-        toggle.innerHTML = '&#9654;';
-    }
-}
-
-// Checkbox logic
-var bulkBar = document.getElementById('bulkBar');
-var selectedCountEl = document.getElementById('selectedCount');
-
-function updateBulkBar() {
-    var checked = document.querySelectorAll('.log-checkbox:checked');
-    if (checked.length > 0) {
-        bulkBar.style.display = 'flex';
-        selectedCountEl.textContent = checked.length;
-    } else {
-        bulkBar.style.display = 'none';
-    }
-    // Update group checkboxes
-    document.querySelectorAll('.group-checkbox').forEach(function(gcb) {
-        var gi = gcb.dataset.group;
-        var groupCBs = document.querySelectorAll('.log-checkbox[data-group="' + gi + '"]');
-        var allChecked = groupCBs.length > 0 && Array.from(groupCBs).every(function(cb) { return cb.checked; });
-        gcb.checked = allChecked;
+if (autoRefreshToggle) {
+    autoRefreshToggle.addEventListener('change', function() {
+        if (this.checked) {
+            localStorage.setItem('logsAutoRefresh', 'true');
+            startAutoRefresh();
+        } else {
+            localStorage.setItem('logsAutoRefresh', 'false');
+            stopAutoRefresh();
+        }
     });
 }
-
-function toggleGroupCheckboxes(gi) {
-    var gcb = document.querySelector('.group-checkbox[data-group="' + gi + '"]');
-    var groupCBs = document.querySelectorAll('.log-checkbox[data-group="' + gi + '"]');
-    groupCBs.forEach(function(cb) { cb.checked = gcb.checked; });
-    // Auto-expand when selecting
-    if (gcb.checked) {
-        var body = document.getElementById('group-' + gi);
-        var toggle = document.getElementById('toggle-' + gi);
-        body.style.display = 'block';
-        toggle.innerHTML = '&#9660;';
+function startAutoRefresh() {
+    stopAutoRefresh();
+    autoRefreshInterval = setInterval(function() { location.reload(); }, 30000);
+}
+function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
     }
-    updateBulkBar();
 }
 
-document.addEventListener('change', function(e) {
-    if (e.target.classList.contains('log-checkbox')) { updateBulkBar(); }
-});
+var bulkBar = document.getElementById('bulkBar');
+var selectedCountEl = document.getElementById('selectedCount');
+var selectAllLogs = document.getElementById('selectAllLogs');
+
+function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.log-checkbox:checked'))
+        .map(function(cb) { return parseInt(cb.value, 10); })
+        .filter(function(v) { return Number.isInteger(v); });
+}
+
+function updateBulkBar() {
+    if (!bulkBar || !selectedCountEl) return;
+    var checked = document.querySelectorAll('.log-checkbox:checked');
+    selectedCountEl.textContent = checked.length;
+    bulkBar.style.display = checked.length ? 'flex' : 'none';
+
+    if (!selectAllLogs) return;
+    var all = document.querySelectorAll('.log-checkbox');
+    if (!all.length) {
+        selectAllLogs.checked = false;
+        selectAllLogs.indeterminate = false;
+        return;
+    }
+    selectAllLogs.checked = checked.length === all.length;
+    selectAllLogs.indeterminate = checked.length > 0 && checked.length < all.length;
+}
 
 function clearSelection() {
     document.querySelectorAll('.log-checkbox').forEach(function(cb) { cb.checked = false; });
-    document.querySelectorAll('.group-checkbox').forEach(function(cb) { cb.checked = false; });
+    if (selectAllLogs) {
+        selectAllLogs.checked = false;
+        selectAllLogs.indeterminate = false;
+    }
     updateBulkBar();
-}
-
-function getSelectedIds() {
-    var ids = [];
-    document.querySelectorAll('.log-checkbox:checked').forEach(function(cb) { ids.push(parseInt(cb.value)); });
-    return ids;
 }
 
 function bulkResend() {
     var ids = getSelectedIds();
-    if (ids.length === 0) return;
+    if (!ids.length) return;
     if (!confirm('Resend ' + ids.length + ' notification(s)?')) return;
     fetch('/logs/resend-bulk', {
         method: 'POST',
@@ -218,12 +235,14 @@ function bulkResend() {
         } else {
             location.href = '/logs?error=' + encodeURIComponent(data.error || 'Bulk resend failed');
         }
+    }).catch(function() {
+        location.href = '/logs?error=' + encodeURIComponent('Bulk resend failed');
     });
 }
 
 function bulkDelete() {
     var ids = getSelectedIds();
-    if (ids.length === 0) return;
+    if (!ids.length) return;
     if (!confirm('Permanently delete ' + ids.length + ' log record(s)? This cannot be undone.')) return;
     fetch('/logs/delete-bulk', {
         method: 'POST',
@@ -236,9 +255,25 @@ function bulkDelete() {
         } else {
             location.href = '/logs?error=' + encodeURIComponent(data.error || 'Delete failed');
         }
+    }).catch(function() {
+        location.href = '/logs?error=' + encodeURIComponent('Delete failed');
     });
 }
-document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
+
+if (selectAllLogs) {
+    selectAllLogs.addEventListener('change', function() {
+        document.querySelectorAll('.log-checkbox').forEach(function(cb) { cb.checked = selectAllLogs.checked; });
+        updateBulkBar();
+    });
+}
+
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('log-checkbox')) {
+        updateBulkBar();
+    }
+});
+
+updateBulkBar();
 </script>
 
 </main>
