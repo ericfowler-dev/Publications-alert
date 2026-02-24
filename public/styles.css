@@ -498,6 +498,18 @@ tbody td input[type="checkbox"] { cursor: pointer; }
 .badge-internal { background: #e7f0ff; color: #0b4ea2; }
 .badge-essential { background: var(--gray-200); color: var(--gray-600); }
 .badge-comprehensive, .badge-all-announcements { background: var(--primary-50); color: var(--primary); }
+.badge-import-insert { background: var(--success-light); color: #155724; }
+.badge-import-update { background: var(--info-light); color: #0c5460; }
+.badge-import-skip { background: var(--danger-light); color: #721c24; }
+
+.import-row-error { background: #fff5f5; }
+.import-row-warning { background: #fff9e6; }
+.import-issues { font-size: 11px; color: var(--gray-600); }
+.import-issues .import-error { color: #b91c1c; font-weight: 600; }
+.import-issues .import-warning { color: #92400e; font-weight: 600; }
+.import-summary-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+.import-summary-card { background: var(--gray-100); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--gray-700); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .tag {
   display: inline-block;

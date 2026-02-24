@@ -584,6 +584,7 @@ app.get('/customers/export', async (req, res) => {
       { header: 'CC Emails', key: 'cc_emails', width: 28 },
       { header: 'Type', key: 'customer_type', width: 14 },
       { header: 'Subscription Tier', key: 'subscription_tier', width: 18 },
+      { header: 'Preferred Frequency', key: 'preferred_frequency', width: 18 },
       { header: 'Status', key: 'status', width: 10 },
       { header: 'Products', key: 'products', width: 30 },
       { header: 'Markets', key: 'markets', width: 24 },
@@ -605,6 +606,7 @@ app.get('/customers/export', async (req, res) => {
         cc_emails: c.cc_emails || '',
         customer_type: c.customer_type || '',
         subscription_tier: c.subscription_tier || '',
+        preferred_frequency: c.preferred_frequency || '',
         status: c.status || '',
         products: c.products || '',
         markets: c.markets || '',
@@ -625,127 +627,497 @@ app.get('/customers/export', async (req, res) => {
   }
 });
 
+const CUSTOMER_TYPE_OPTIONS = ['Internal', 'OEM', 'Dealer', 'Distributor', 'End User'];
+const SUBSCRIPTION_TIER_OPTIONS = ['Essential', 'Standard', 'All Announcements'];
+const STATUS_OPTIONS = ['Active', 'Inactive', 'Suspended'];
+const FREQUENCY_OPTIONS = ['Immediate', 'Daily Digest', 'Weekly Digest'];
+
+const CUSTOMER_IMPORT_TEMPLATE_COLUMNS = [
+  { header: 'Customer ID', key: 'customer_id', width: 16 },
+  { header: 'Contact Name', key: 'contact_name', width: 22 },
+  { header: 'Company', key: 'company', width: 24 },
+  { header: 'Email', key: 'email', width: 28 },
+  { header: 'CC Emails', key: 'cc_emails', width: 28 },
+  { header: 'Customer Type', key: 'customer_type', width: 16 },
+  { header: 'Subscription Tier', key: 'subscription_tier', width: 18 },
+  { header: 'Preferred Frequency', key: 'preferred_frequency', width: 18 },
+  { header: 'Status', key: 'status', width: 12 },
+  { header: 'Engine Sizes (Products)', key: 'products', width: 30 },
+  { header: 'Market Type (Markets)', key: 'markets', width: 24 },
+  { header: 'Content Types', key: 'content_types', width: 24 },
+  { header: 'Regions', key: 'regions', width: 20 }
+];
+
+const CUSTOMER_IMPORT_HEADER_ALIASES = {
+  'customer id': 'customer_id',
+  'customer number': 'customer_id',
+  'contact name': 'contact_name',
+  'company': 'company',
+  'email': 'email',
+  'cc emails': 'cc_emails',
+  'cc email': 'cc_emails',
+  'type': 'customer_type',
+  'customer type': 'customer_type',
+  'subscription tier': 'subscription_tier',
+  'status': 'status',
+  'preferred frequency': 'preferred_frequency',
+  'frequency': 'preferred_frequency',
+  'notification frequency': 'preferred_frequency',
+  'preferred freq': 'preferred_frequency',
+  'freq': 'preferred_frequency',
+  'products': 'products',
+  'engine size': 'products',
+  'engine sizes': 'products',
+  'engine sizes (products)': 'products',
+  'markets': 'markets',
+  'market type': 'markets',
+  'market types': 'markets',
+  'market type (markets)': 'markets',
+  'content types': 'content_types',
+  'content type': 'content_types',
+  'regions': 'regions'
+};
+
+function normalizeHeaderValue(value) {
+  return String(value || '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function buildHeaderMap(sheet) {
+  const headerMap = {};
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell((cell, colNumber) => {
+    const text = normalizeHeaderValue(cell.text || cell.value || '');
+    if (!text) return;
+    const key = CUSTOMER_IMPORT_HEADER_ALIASES[text] || text;
+    headerMap[key] = colNumber;
+  });
+  return headerMap;
+}
+
+function getCellValue(row, headerMap, key) {
+  const col = headerMap[key];
+  if (!col) return '';
+  const cell = row.getCell(col);
+  return String(cell.text || cell.value || '').trim();
+}
+
+function buildAllowedMap(list) {
+  const map = new Map();
+  (list || []).forEach(item => {
+    if (item) map.set(item.toLowerCase(), item);
+  });
+  return map;
+}
+
+function normalizeList(value, options) {
+  if (!value) return { value: '', unknown: [] };
+  const parts = String(value)
+    .split(/[;,]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+  if (!parts.length) return { value: '', unknown: [] };
+
+  const normalized = [];
+  const unknown = [];
+  const seen = new Set();
+  parts.forEach(part => {
+    const lower = part.toLowerCase();
+    let canonical = part;
+    if (options && options.allValue && (lower === 'all' || lower === options.allValue.toLowerCase())) {
+      canonical = options.allValue;
+    } else if (options && options.synonyms && options.synonyms[lower]) {
+      canonical = options.synonyms[lower];
+    } else if (options && options.allowedMap && options.allowedMap.has(lower)) {
+      canonical = options.allowedMap.get(lower);
+    } else if (options && options.allowedMap) {
+      unknown.push(part);
+    }
+    const key = canonical.toLowerCase();
+    if (!seen.has(key)) {
+      normalized.push(canonical);
+      seen.add(key);
+    }
+  });
+  return { value: normalized.join('; '), unknown };
+}
+
+function normalizeStatus(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'Active';
+  if (raw.startsWith('inact')) return 'Inactive';
+  if (raw.startsWith('susp')) return 'Suspended';
+  if (raw.startsWith('act')) return 'Active';
+  return value.trim();
+}
+
+function normalizeCustomerType(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'End User';
+  if (raw.startsWith('internal')) return 'Internal';
+  if (raw === 'internal employee') return 'Internal';
+  if (raw === 'oem') return 'OEM';
+  if (raw === 'dealer') return 'Dealer';
+  if (raw === 'distributor') return 'Distributor';
+  if (raw === 'end user' || raw === 'enduser' || raw === 'end-user') return 'End User';
+  return value.trim();
+}
+
+function normalizeTier(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'All Announcements';
+  if (raw.startsWith('essential')) return 'Essential';
+  if (raw.startsWith('standard')) return 'Standard';
+  if (raw.includes('all')) return 'All Announcements';
+  if (raw.includes('comprehensive')) return 'All Announcements';
+  return value.trim();
+}
+
+function normalizeFrequency(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'Immediate';
+  if (raw.startsWith('daily')) return 'Daily Digest';
+  if (raw.startsWith('weekly')) return 'Weekly Digest';
+  if (raw.startsWith('immed')) return 'Immediate';
+  return value.trim();
+}
+
+async function loadCustomerImportSheet(filePath, originalName) {
+  const ext = path.extname(originalName || filePath || '').toLowerCase();
+  const workbook = new ExcelJS.Workbook();
+  let sheet = null;
+  if (ext === '.csv') {
+    sheet = await workbook.csv.readFile(filePath);
+  } else if (ext === '.xlsx') {
+    await workbook.xlsx.readFile(filePath);
+    sheet = workbook.worksheets[0];
+  } else {
+    throw new Error('Unsupported import file type');
+  }
+  return sheet;
+}
+
+async function buildCustomerImportPreview(filePath, originalName) {
+  const metadata = await getMetadata();
+  const sheet = await loadCustomerImportSheet(filePath, originalName);
+  if (!sheet) {
+    return { rows: [], summary: { total: 0, valid: 0, invalid: 0, warnings: 0 }, globalErrors: ['Import file is empty'] };
+  }
+
+  const headerMap = buildHeaderMap(sheet);
+  const requiredHeaders = ['contact_name', 'company', 'email'];
+  const missingHeaders = requiredHeaders.filter(key => !headerMap[key]);
+  const globalErrors = [];
+  if (missingHeaders.length) {
+    globalErrors.push('Missing required column(s): ' + missingHeaders.map(h => h.replace(/_/g, ' ')).join(', '));
+    return { rows: [], summary: { total: 0, valid: 0, invalid: 0, warnings: 0 }, globalErrors };
+  }
+
+  const allowedProducts = buildAllowedMap(metadata.products);
+  const allowedMarkets = buildAllowedMap(metadata.markets);
+  const allowedContentTypes = buildAllowedMap(metadata.content_types);
+  const allowedRegions = buildAllowedMap(metadata.regions);
+  const allowedCustomerTypes = new Set(CUSTOMER_TYPE_OPTIONS.map(v => v.toLowerCase()));
+  const allowedTiers = new Set(SUBSCRIPTION_TIER_OPTIONS.map(v => v.toLowerCase()));
+  const allowedStatuses = new Set(STATUS_OPTIONS.map(v => v.toLowerCase()));
+  const allowedFrequencies = new Set(FREQUENCY_OPTIONS.map(v => v.toLowerCase()));
+
+  const rows = [];
+  for (let i = 2; i <= sheet.rowCount; i += 1) {
+    const row = sheet.getRow(i);
+    if (!row || row.actualCellCount === 0) continue;
+
+    const contact_name = getCellValue(row, headerMap, 'contact_name');
+    const company = getCellValue(row, headerMap, 'company');
+    const email = getCellValue(row, headerMap, 'email');
+    const rawCustomerId = getCellValue(row, headerMap, 'customer_id');
+    const rawCustomerType = getCellValue(row, headerMap, 'customer_type');
+    const rawTier = getCellValue(row, headerMap, 'subscription_tier');
+    const rawStatus = getCellValue(row, headerMap, 'status');
+    const rawFrequency = getCellValue(row, headerMap, 'preferred_frequency');
+
+    const customer_type = normalizeCustomerType(rawCustomerType);
+    const isInternal = customer_type.toLowerCase() === 'internal';
+    const customer_id = isInternal ? '' : (rawCustomerId && rawCustomerId.toLowerCase() === 'internal employee' ? '' : rawCustomerId);
+    const subscription_tier = normalizeTier(rawTier);
+    const status = normalizeStatus(rawStatus);
+    const preferred_frequency = normalizeFrequency(rawFrequency);
+
+    const productsResult = normalizeList(getCellValue(row, headerMap, 'products'), {
+      allowedMap: allowedProducts,
+      allValue: 'All Products'
+    });
+    const marketsResult = normalizeList(getCellValue(row, headerMap, 'markets'), {
+      allowedMap: allowedMarkets,
+      allValue: 'All Markets'
+    });
+    const contentTypesResult = normalizeList(getCellValue(row, headerMap, 'content_types'), {
+      allowedMap: allowedContentTypes,
+      allValue: 'All Content Types'
+    });
+    const regionsResult = normalizeList(getCellValue(row, headerMap, 'regions'), {
+      allowedMap: allowedRegions,
+      allValue: 'Global'
+    });
+
+    const errors = [];
+    const warnings = [];
+    if (!contact_name) errors.push('Missing contact name');
+    if (!company) errors.push('Missing company');
+    if (!email) errors.push('Missing email');
+    if (!isInternal && !customer_id) errors.push('Customer ID required for non-internal customers');
+    if (email && !/.+@.+\..+/.test(email)) warnings.push('Email format looks invalid');
+
+    if (rawCustomerType && customer_type !== rawCustomerType.trim()) {
+      warnings.push(`Customer Type normalized to "${customer_type}"`);
+    }
+    if (rawCustomerType && !allowedCustomerTypes.has(customer_type.toLowerCase())) {
+      warnings.push('Unknown customer type: ' + rawCustomerType);
+    }
+    if (rawTier && subscription_tier !== rawTier.trim()) {
+      warnings.push(`Subscription Tier normalized to "${subscription_tier}"`);
+    }
+    if (rawTier && !allowedTiers.has(subscription_tier.toLowerCase())) {
+      warnings.push('Unknown subscription tier: ' + rawTier);
+    }
+    if (rawStatus && status !== rawStatus.trim()) {
+      warnings.push(`Status normalized to "${status}"`);
+    }
+    if (rawStatus && !allowedStatuses.has(status.toLowerCase())) {
+      warnings.push('Unknown status: ' + rawStatus);
+    }
+    if (rawFrequency && preferred_frequency !== rawFrequency.trim()) {
+      warnings.push(`Preferred Frequency normalized to "${preferred_frequency}"`);
+    }
+    if (rawFrequency && !allowedFrequencies.has(preferred_frequency.toLowerCase())) {
+      warnings.push('Unknown preferred frequency: ' + rawFrequency);
+    }
+
+    if (productsResult.unknown.length) warnings.push('Unknown engine size(s): ' + productsResult.unknown.join(', '));
+    if (marketsResult.unknown.length) warnings.push('Unknown market type(s): ' + marketsResult.unknown.join(', '));
+    if (contentTypesResult.unknown.length) warnings.push('Unknown content type(s): ' + contentTypesResult.unknown.join(', '));
+    if (regionsResult.unknown.length) warnings.push('Unknown region(s): ' + regionsResult.unknown.join(', '));
+
+    rows.push({
+      rowNumber: i,
+      data: {
+        contact_name,
+        company,
+        customer_id,
+        email,
+        cc_emails: getCellValue(row, headerMap, 'cc_emails'),
+        customer_type,
+        subscription_tier,
+        preferred_frequency,
+        status,
+        products: productsResult.value,
+        markets: marketsResult.value,
+        content_types: contentTypesResult.value,
+        regions: regionsResult.value
+      },
+      errors,
+      warnings,
+      action: 'skip'
+    });
+  }
+
+  const existingCustomers = await dbAll('SELECT id, customer_id, email, company FROM customers');
+  const byCustomerId = new Map();
+  const byEmailCompany = new Map();
+  existingCustomers.forEach(c => {
+    if (c.customer_id) byCustomerId.set(String(c.customer_id).toLowerCase(), c);
+    if (c.email && c.company) {
+      byEmailCompany.set(`${String(c.email).toLowerCase()}|${String(c.company).toLowerCase()}`, c);
+    }
+  });
+
+  rows.forEach(row => {
+    if (row.errors.length) {
+      row.action = 'skip';
+      return;
+    }
+    const customerIdKey = row.data.customer_id ? row.data.customer_id.toLowerCase() : '';
+    let existing = null;
+    if (customerIdKey) existing = byCustomerId.get(customerIdKey);
+    if (!existing) {
+      existing = byEmailCompany.get(`${row.data.email.toLowerCase()}|${row.data.company.toLowerCase()}`);
+    }
+    row.action = existing ? 'update' : 'insert';
+  });
+
+  const summary = {
+    total: rows.length,
+    valid: rows.filter(r => r.errors.length === 0).length,
+    invalid: rows.filter(r => r.errors.length > 0).length,
+    warnings: rows.filter(r => r.warnings.length > 0).length
+  };
+
+  return { rows, summary, globalErrors };
+}
+
+app.get('/customers/import-template', async (req, res) => {
+  try {
+    const metadata = await getMetadata();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Customers');
+    const listSheet = workbook.addWorksheet('Lists');
+
+    sheet.columns = CUSTOMER_IMPORT_TEMPLATE_COLUMNS;
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    const lists = [
+      { name: 'Customer Types', values: CUSTOMER_TYPE_OPTIONS },
+      { name: 'Subscription Tiers', values: SUBSCRIPTION_TIER_OPTIONS },
+      { name: 'Statuses', values: STATUS_OPTIONS },
+      { name: 'Preferred Frequencies', values: FREQUENCY_OPTIONS },
+      { name: 'Engine Sizes', values: metadata.products },
+      { name: 'Market Types', values: metadata.markets },
+      { name: 'Content Types', values: metadata.content_types },
+      { name: 'Regions', values: metadata.regions }
+    ];
+
+    lists.forEach((list, index) => {
+      const col = index + 1;
+      listSheet.getCell(1, col).value = list.name;
+      list.values.forEach((value, rowIndex) => {
+        listSheet.getCell(rowIndex + 2, col).value = value;
+      });
+      listSheet.getColumn(col).width = Math.max(18, list.name.length + 2);
+    });
+    listSheet.state = 'veryHidden';
+
+    const listRanges = {
+      customer_type: `Lists!$A$2:$A$${Math.max(CUSTOMER_TYPE_OPTIONS.length, 1) + 1}`,
+      subscription_tier: `Lists!$B$2:$B$${Math.max(SUBSCRIPTION_TIER_OPTIONS.length, 1) + 1}`,
+      status: `Lists!$C$2:$C$${Math.max(STATUS_OPTIONS.length, 1) + 1}`,
+      preferred_frequency: `Lists!$D$2:$D$${Math.max(FREQUENCY_OPTIONS.length, 1) + 1}`,
+      products: `Lists!$E$2:$E$${Math.max(metadata.products.length, 1) + 1}`,
+      markets: `Lists!$F$2:$F$${Math.max(metadata.markets.length, 1) + 1}`,
+      content_types: `Lists!$G$2:$G$${Math.max(metadata.content_types.length, 1) + 1}`,
+      regions: `Lists!$H$2:$H$${Math.max(metadata.regions.length, 1) + 1}`
+    };
+
+    const validationRows = 2000;
+    const validationConfig = [
+      { col: 6, range: listRanges.customer_type, prompt: 'Select a customer type.' },
+      { col: 7, range: listRanges.subscription_tier, prompt: 'Select a subscription tier.' },
+      { col: 8, range: listRanges.preferred_frequency, prompt: 'Select a preferred frequency.' },
+      { col: 9, range: listRanges.status, prompt: 'Select a status.' },
+      { col: 10, range: listRanges.products, prompt: 'Choose engine sizes. Separate multiple values with a semicolon (;).' },
+      { col: 11, range: listRanges.markets, prompt: 'Choose market types. Separate multiple values with a semicolon (;).' },
+      { col: 12, range: listRanges.content_types, prompt: 'Choose content types. Separate multiple values with a semicolon (;).' },
+      { col: 13, range: listRanges.regions, prompt: 'Choose regions. Separate multiple values with a semicolon (;).' }
+    ];
+
+    validationConfig.forEach(cfg => {
+      for (let rowIndex = 2; rowIndex <= validationRows; rowIndex += 1) {
+        sheet.getCell(rowIndex, cfg.col).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: [cfg.range],
+          showInputMessage: true,
+          promptTitle: 'Selection',
+          prompt: cfg.prompt
+        };
+      }
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=customer-import-template.xlsx');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Customer import template error:', err);
+    res.status(500).send('Template download failed');
+  }
+});
+
+app.get('/customers/import-template.csv', (req, res) => {
+  const headers = CUSTOMER_IMPORT_TEMPLATE_COLUMNS.map(col => col.header).join(',');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=customer-import-template.csv');
+  res.send(headers + '\n');
+});
+
 app.post('/customers/import', upload.single('importFile'), async (req, res) => {
   try {
     if (!req.file) {
       return res.redirect('/customers?error=' + encodeURIComponent('No import file selected'));
     }
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(req.file.path);
-    const sheet = workbook.worksheets[0];
-    if (!sheet) {
+    const preview = await buildCustomerImportPreview(req.file.path, req.file.originalname);
+    if (fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
-      return res.redirect('/customers?error=' + encodeURIComponent('Import file is empty'));
     }
 
-    const headerMap = {};
-    const headerAliases = {
-      'customer id': 'customer_id',
-      'contact name': 'contact_name',
-      'company': 'company',
-      'email': 'email',
-      'cc emails': 'cc_emails',
-      'cc email': 'cc_emails',
-      'type': 'customer_type',
-      'customer type': 'customer_type',
-      'subscription tier': 'subscription_tier',
-      'status': 'status',
-      'products': 'products',
-      'markets': 'markets',
-      'content types': 'content_types',
-      'content type': 'content_types',
-      'regions': 'regions'
-    };
+    const importId = crypto.randomUUID();
+    const importDir = path.join(UPLOAD_DIR, 'imports');
+    ensureDir(importDir);
+    const importPath = path.join(importDir, `customer-import-${importId}.json`);
+    fs.writeFileSync(importPath, JSON.stringify({
+      createdAt: new Date().toISOString(),
+      rows: preview.rows
+    }));
 
-    const headerRow = sheet.getRow(1);
-    headerRow.eachCell((cell, colNumber) => {
-      const text = String(cell.text || cell.value || '').trim().toLowerCase();
-      if (!text) return;
-      const key = headerAliases[text] || text;
-      headerMap[key] = colNumber;
+    res.render('customers_import_preview', {
+      summary: preview.summary,
+      rows: preview.rows,
+      globalErrors: preview.globalErrors,
+      importId
     });
+  } catch (err) {
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.error('Customer import preview error:', err);
+    res.redirect('/customers?error=' + encodeURIComponent('Customer import preview failed'));
+  }
+});
 
-    const getCell = (row, key) => {
-      const col = headerMap[key];
-      if (!col) return '';
-      const cell = row.getCell(col);
-      return String(cell.text || cell.value || '').trim();
-    };
+app.post('/customers/import/confirm', async (req, res) => {
+  try {
+    const importId = req.body.importId;
+    if (!importId || !/^[a-f0-9-]+$/i.test(importId)) {
+      return res.redirect('/customers?error=' + encodeURIComponent('Import session expired'));
+    }
+    const importPath = path.join(UPLOAD_DIR, 'imports', `customer-import-${importId}.json`);
+    if (!fs.existsSync(importPath)) {
+      return res.redirect('/customers?error=' + encodeURIComponent('Import session expired'));
+    }
 
-    const normalizeList = (value) => {
-      if (!value) return '';
-      const parts = String(value)
-        .split(/[;,]+/)
-        .map(v => v.trim())
-        .filter(Boolean);
-      return parts.join('; ');
-    };
-
-    const normalizeStatus = (value) => {
-      const raw = String(value || '').trim().toLowerCase();
-      if (!raw) return 'Active';
-      if (raw.startsWith('inact')) return 'Inactive';
-      if (raw.startsWith('susp')) return 'Suspended';
-      return 'Active';
-    };
-
-    const normalizeCustomerType = (value) => {
-      const raw = String(value || '').trim().toLowerCase();
-      if (!raw) return 'End User';
-      if (raw === 'internal') return 'Internal';
-      if (raw === 'oem') return 'OEM';
-      if (raw === 'dealer') return 'Dealer';
-      if (raw === 'distributor') return 'Distributor';
-      if (raw === 'end user' || raw === 'enduser') return 'End User';
-      return value.trim();
-    };
-
-    const normalizeTier = (value) => {
-      const raw = String(value || '').trim().toLowerCase();
-      if (!raw) return 'All Announcements';
-      if (raw.startsWith('essential')) return 'Essential';
-      if (raw.startsWith('standard')) return 'Standard';
-      if (raw.includes('all')) return 'All Announcements';
-      if (raw.includes('comprehensive')) return 'All Announcements';
-      return value.trim();
-    };
+    const importData = JSON.parse(fs.readFileSync(importPath, 'utf8'));
+    const rows = Array.isArray(importData.rows) ? importData.rows : [];
 
     let inserted = 0;
     let updated = 0;
     let skipped = 0;
 
     await dbRun('BEGIN TRANSACTION');
-    for (let i = 2; i <= sheet.rowCount; i += 1) {
-      const row = sheet.getRow(i);
-      if (!row || row.actualCellCount === 0) continue;
-
-      const contact_name = getCell(row, 'contact_name');
-      const company = getCell(row, 'company');
-      const email = getCell(row, 'email');
-      const rawCustomerId = getCell(row, 'customer_id');
-      const customer_type = normalizeCustomerType(getCell(row, 'customer_type'));
+    for (const row of rows) {
+      if (row.errors && row.errors.length) {
+        skipped += 1;
+        continue;
+      }
+      const data = row.data || {};
+      const contact_name = data.contact_name;
+      const company = data.company;
+      const email = data.email;
+      const cc_emails = data.cc_emails || '';
+      const customer_type = normalizeCustomerType(data.customer_type);
       const isInternal = customer_type.toLowerCase() === 'internal';
-      const customer_id = isInternal ? '' : (rawCustomerId && rawCustomerId.toLowerCase() === 'internal employee' ? '' : rawCustomerId);
-
-      if (!contact_name || !company || !email) {
-        skipped += 1;
-        console.warn(`Import row ${i} skipped: missing contact name, company, or email`);
-        continue;
-      }
-      if (!isInternal && !customer_id) {
-        skipped += 1;
-        console.warn(`Import row ${i} skipped: customer ID required for non-internal customers`);
-        continue;
-      }
-
-      const cc_emails = getCell(row, 'cc_emails');
-      const subscription_tier = normalizeTier(getCell(row, 'subscription_tier'));
-      const status = normalizeStatus(getCell(row, 'status'));
-      const products = normalizeList(getCell(row, 'products'));
-      const markets = normalizeList(getCell(row, 'markets'));
-      const content_types = normalizeList(getCell(row, 'content_types'));
-      const regions = normalizeList(getCell(row, 'regions'));
+      const customer_id = isInternal ? '' : (data.customer_id || '');
+      const subscription_tier = normalizeTier(data.subscription_tier);
+      const preferred_frequency = normalizeFrequency(data.preferred_frequency);
+      const status = normalizeStatus(data.status);
+      const products = data.products || '';
+      const markets = data.markets || '';
+      const content_types = data.content_types || '';
+      const regions = data.regions || '';
 
       let existing = null;
       if (customer_id && !isInternal) {
@@ -757,7 +1129,7 @@ app.post('/customers/import', upload.single('importFile'), async (req, res) => {
 
       if (existing) {
         await dbRun(
-          `UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, status=? WHERE id=?`,
+          `UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, preferred_frequency=?, status=? WHERE id=?`,
           [
             contact_name || existing.contact_name,
             company || existing.company,
@@ -770,6 +1142,7 @@ app.post('/customers/import', upload.single('importFile'), async (req, res) => {
             regions || existing.regions || '',
             customer_type || existing.customer_type,
             subscription_tier || existing.subscription_tier,
+            preferred_frequency || existing.preferred_frequency,
             status || existing.status,
             existing.id
           ]
@@ -777,8 +1150,8 @@ app.post('/customers/import', upload.single('importFile'), async (req, res) => {
         updated += 1;
       } else {
         await dbRun(
-          `INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, preferred_frequency, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             contact_name,
             company,
@@ -791,6 +1164,7 @@ app.post('/customers/import', upload.single('importFile'), async (req, res) => {
             regions || '',
             customer_type,
             subscription_tier,
+            preferred_frequency,
             status
           ]
         );
@@ -799,7 +1173,7 @@ app.post('/customers/import', upload.single('importFile'), async (req, res) => {
     }
     await dbRun('COMMIT');
 
-    fs.unlinkSync(req.file.path);
+    fs.unlinkSync(importPath);
     const message = `Import complete: ${inserted} added, ${updated} updated, ${skipped} skipped.`;
     res.redirect('/customers?success=' + encodeURIComponent(message));
   } catch (err) {
@@ -808,12 +1182,20 @@ app.post('/customers/import', upload.single('importFile'), async (req, res) => {
     } catch (rollbackErr) {
       console.error('Import rollback error:', rollbackErr);
     }
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
     console.error('Customer import error:', err);
     res.redirect('/customers?error=' + encodeURIComponent('Customer import failed'));
   }
+});
+
+app.post('/customers/import/cancel', (req, res) => {
+  const importId = req.body.importId;
+  if (importId && /^[a-f0-9-]+$/i.test(importId)) {
+    const importPath = path.join(UPLOAD_DIR, 'imports', `customer-import-${importId}.json`);
+    if (fs.existsSync(importPath)) {
+      fs.unlinkSync(importPath);
+    }
+  }
+  res.redirect('/customers');
 });
 
 app.get('/customers/new', async (req, res) => {

@@ -1,0 +1,114 @@
+<%- include('partials/head', { title: 'Import Customers' }) %>
+<%- include('partials/nav', { currentPage: 'customers' }) %>
+
+<div class="page-header">
+    <div>
+        <h1>Import Customers</h1>
+        <div class="subtitle"><%= summary.total %> row(s) detected</div>
+    </div>
+    <div class="actions">
+        <form action="/customers/import/confirm" method="POST" style="display: inline;">
+            <input type="hidden" name="importId" value="<%= importId %>">
+            <button type="submit" class="btn btn-primary" <%= (globalErrors && globalErrors.length) || summary.valid === 0 ? 'disabled' : '' %>>Import Valid Rows</button>
+        </form>
+        <form action="/customers/import/cancel" method="POST" style="display: inline;">
+            <input type="hidden" name="importId" value="<%= importId %>">
+            <button type="submit" class="btn btn-secondary">Cancel</button>
+        </form>
+    </div>
+</div>
+
+<% if (globalErrors && globalErrors.length) { %>
+<div class="card" style="margin-bottom: 16px;">
+    <div class="card-body">
+        <div class="text-muted" style="font-weight: 600; margin-bottom: 6px;">Fix these issues before importing:</div>
+        <ul style="margin: 0; padding-left: 18px;">
+            <% globalErrors.forEach(function(err) { %>
+                <li><%= err %></li>
+            <% }); %>
+        </ul>
+    </div>
+</div>
+<% } %>
+
+<div class="card" style="margin-bottom: 16px;">
+    <div class="card-body">
+        <div class="import-summary-grid">
+            <div class="import-summary-card"><strong>Total:</strong> <%= summary.total %></div>
+            <div class="import-summary-card"><strong>Valid:</strong> <%= summary.valid %></div>
+            <div class="import-summary-card"><strong>Invalid:</strong> <%= summary.invalid %></div>
+            <div class="import-summary-card"><strong>Warnings:</strong> <%= summary.warnings %></div>
+        </div>
+        <div class="text-muted" style="margin-top: 8px;">Rows with errors will be skipped. Warnings will still import.</div>
+    </div>
+</div>
+
+<% if (rows && rows.length) { %>
+<div class="card">
+    <div class="card-body" style="padding: 0;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 70px;">Row</th>
+                        <th style="width: 90px;">Action</th>
+                        <th>Contact Name</th>
+                        <th>Company</th>
+                        <th>Email</th>
+                        <th>Customer ID</th>
+                        <th>Type</th>
+                        <th>Tier</th>
+                        <th>Frequency</th>
+                        <th>Status</th>
+                        <th>Engine Sizes</th>
+                        <th>Market Types</th>
+                        <th>Content Types</th>
+                        <th>Regions</th>
+                        <th style="width: 220px;">Issues</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% rows.forEach(function(row) { %>
+                        <% var rowClass = row.errors.length ? 'import-row-error' : (row.warnings.length ? 'import-row-warning' : ''); %>
+                        <tr class="<%= rowClass %>">
+                            <td><%= row.rowNumber %></td>
+                            <td><span class="badge badge-import-<%= row.action %>"><%= row.action.charAt(0).toUpperCase() + row.action.slice(1) %></span></td>
+                            <td><%= row.data.contact_name || '' %></td>
+                            <td><%= row.data.company || '' %></td>
+                            <td><%= row.data.email || '' %></td>
+                            <td><%= row.data.customer_id || '' %></td>
+                            <td><%= row.data.customer_type || '' %></td>
+                            <td><%= row.data.subscription_tier || '' %></td>
+                            <td><%= row.data.preferred_frequency || '' %></td>
+                            <td><%= row.data.status || '' %></td>
+                            <td><%= row.data.products || '' %></td>
+                            <td><%= row.data.markets || '' %></td>
+                            <td><%= row.data.content_types || '' %></td>
+                            <td><%= row.data.regions || '' %></td>
+                            <td class="import-issues">
+                                <% if (row.errors.length) { %>
+                                    <div class="import-error">Errors: <%= row.errors.join('; ') %></div>
+                                <% } %>
+                                <% if (row.warnings.length) { %>
+                                    <div class="import-warning">Warnings: <%= row.warnings.join('; ') %></div>
+                                <% } %>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<% } else { %>
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <div class="empty-state-icon"><i class="bi bi-upload"></i></div>
+            <h3>No rows to import</h3>
+            <p>Please upload a file with customer data.</p>
+            <a href="/customers" class="btn btn-secondary">Back to Customers</a>
+        </div>
+    </div>
+</div>
+<% } %>
