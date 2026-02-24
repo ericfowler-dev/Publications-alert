@@ -74,6 +74,17 @@ function sortArrow(column) {
     <button type="button" class="btn btn-sm" onclick="bulkDeleteCustomers()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="clearCustomerSelection()"><i class="bi bi-x-circle"></i> Clear</button>
 </div>
+<div id="customerBulkHint" class="bulk-hint">Select rows to enable bulk actions.</div>
+
+<div class="card" style="margin-bottom: 12px;">
+    <div class="card-body" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--gray-700);">
+            <input type="checkbox" id="selectAllCustomers" title="Select all customers">
+            Select all (this page)
+        </label>
+        <div class="text-muted"><%= customers.length %> customer(s)</div>
+    </div>
+</div>
 
 <div class="card">
     <div class="card-body" style="padding: 0;">
@@ -81,9 +92,7 @@ function sortArrow(column) {
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 36px;">
-                            <input type="checkbox" id="selectAllCustomers" title="Select all customers">
-                        </th>
+                        <th style="width: 36px;"></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'contact_name', dir: nextSortDir('contact_name') }) %>">Contact Name<%= sortArrow('contact_name') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'company', dir: nextSortDir('company') }) %>">Company<%= sortArrow('company') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'customer_id', dir: nextSortDir('customer_id') }) %>">Customer ID<%= sortArrow('customer_id') %></a></th>
@@ -191,6 +200,7 @@ if (toast) {
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
 
 var customerBulkBar = document.getElementById('customerBulkBar');
+var customerBulkHint = document.getElementById('customerBulkHint');
 var customerSelectedCount = document.getElementById('customerSelectedCount');
 var customerSelectAll = document.getElementById('selectAllCustomers');
 
@@ -203,6 +213,7 @@ function updateCustomerSelectionUi() {
     var checked = getCheckedCustomers();
     customerSelectedCount.textContent = checked.length;
     customerBulkBar.style.display = checked.length ? 'flex' : 'none';
+    if (customerBulkHint) customerBulkHint.style.display = checked.length ? 'none' : 'block';
 
     if (!customerSelectAll) return;
     var all = document.querySelectorAll('.customer-checkbox');
@@ -236,7 +247,11 @@ function bulkDeleteCustomers() {
     }).then(function(res) { return res.json(); })
       .then(function(data) {
           if (data.success) {
-              location.href = '/customers?success=' + encodeURIComponent('Deleted ' + data.count + ' customer record(s)');
+              var msg = 'Deleted ' + data.count + ' customer record(s)';
+              if (data.skipped) {
+                  msg += ' (' + data.skipped + ' internal skipped)';
+              }
+              location.href = '/customers?success=' + encodeURIComponent(msg);
           } else {
               location.href = '/customers?error=' + encodeURIComponent(data.error || 'Delete failed');
           }

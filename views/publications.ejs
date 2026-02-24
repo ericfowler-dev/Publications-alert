@@ -1,6 +1,28 @@
 <%- include('partials/head', { title: 'Publications' }) %>
 <%- include('partials/nav', { currentPage: 'publications' }) %>
 
+<%
+function publicationsQuery(overrides) {
+    const params = new URLSearchParams();
+    const searchValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'search') ? overrides.search : search;
+    const statusValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'status') ? overrides.status : statusFilter;
+    const urgencyValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'urgency') ? overrides.urgency : urgencyFilter;
+    const archivedValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'archived') ? overrides.archived : archivedFilter;
+    const pageValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'page') ? overrides.page : page;
+    const pageSizeValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'pageSize') ? overrides.pageSize : pageSize;
+
+    if (searchValue) params.set('search', searchValue);
+    if (statusValue) params.set('status', statusValue);
+    if (urgencyValue) params.set('urgency', urgencyValue);
+    if (archivedValue) params.set('archived', archivedValue);
+    if (pageSizeValue) params.set('pageSize', pageSizeValue);
+    if (pageValue && Number(pageValue) > 1) params.set('page', pageValue);
+
+    const query = params.toString();
+    return query ? ('?' + query) : '';
+}
+%>
+
 <% if (success) { %>
 <div class="toast toast-success" id="toast"><%= success %></div>
 <% } %>
@@ -11,7 +33,7 @@
 <div class="page-header">
     <div>
         <h1>Publications</h1>
-        <div class="subtitle"><%= publications.length %> publication(s)</div>
+        <div class="subtitle"><%= totalPublications %> publication(s)<%= archivedFilter ? ' (archived)' : '' %></div>
     </div>
     <div class="actions">
         <a href="/publications/new" class="btn btn-primary"><i class="bi bi-cloud-upload"></i> Upload New Publication</a>
@@ -22,28 +44,82 @@
 <div class="table-toolbar">
     <form method="GET" action="/publications" class="toolbar-search">
         <input type="text" name="search" placeholder="Search by title or publication number..." value="<%= search %>" class="search-input">
+        <input type="hidden" name="status" value="<%= statusFilter %>">
+        <input type="hidden" name="urgency" value="<%= urgencyFilter %>">
+        <input type="hidden" name="archived" value="<%= archivedFilter %>">
+        <input type="hidden" name="pageSize" value="<%= pageSize %>">
+        <input type="hidden" name="page" value="1">
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
-        <% if (search || statusFilter || urgencyFilter) { %>
-            <a href="/publications" class="btn btn-secondary btn-sm">Clear</a>
+        <% if (search || statusFilter || urgencyFilter || archivedFilter) { %>
+            <a href="/publications<%= publicationsQuery({ search: '', status: '', urgency: '', archived: '', page: 1 }) %>" class="btn btn-secondary btn-sm">Clear</a>
         <% } %>
     </form>
     <div class="filter-group">
         <span class="filter-label">Status:</span>
-        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Draft" class="filter-pill <%= statusFilter === 'Draft' ? 'active' : '' %>">Draft</a>
-        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>status=Distributed" class="filter-pill <%= statusFilter === 'Distributed' ? 'active' : '' %>">Distributed</a>
+        <a href="/publications<%= publicationsQuery({ status: 'Draft', page: 1 }) %>" class="filter-pill <%= statusFilter === 'Draft' ? 'active' : '' %>">Draft</a>
+        <a href="/publications<%= publicationsQuery({ status: 'Distributed', page: 1 }) %>" class="filter-pill <%= statusFilter === 'Distributed' ? 'active' : '' %>">Distributed</a>
         <span class="filter-label" style="margin-left: 12px;">Urgency:</span>
-        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=Critical/Safety" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
-        <a href="/publications?<%= search ? 'search=' + encodeURIComponent(search) + '&' : '' %>urgency=High" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
+        <a href="/publications<%= publicationsQuery({ urgency: 'Critical/Safety', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
+        <a href="/publications<%= publicationsQuery({ urgency: 'High', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">View:</span>
+        <a href="/publications<%= publicationsQuery({ archived: '', page: 1 }) %>" class="filter-pill <%= !archivedFilter ? 'active' : '' %>">Active</a>
+        <a href="/publications<%= publicationsQuery({ archived: '1', page: 1 }) %>" class="filter-pill <%= archivedFilter ? 'active' : '' %>">Archived</a>
     </div>
 </div>
 
+<%
+const publicationFilterChips = [];
+if (search) publicationFilterChips.push({ label: 'Search', value: search });
+if (statusFilter) publicationFilterChips.push({ label: 'Status', value: statusFilter });
+if (urgencyFilter) publicationFilterChips.push({ label: 'Urgency', value: urgencyFilter });
+if (archivedFilter) publicationFilterChips.push({ label: 'View', value: 'Archived' });
+%>
+<% if (publicationFilterChips.length) { %>
+<div class="filter-summary">
+    <span class="filter-summary-label">Active filters:</span>
+    <% publicationFilterChips.forEach(function(item) { %>
+        <span class="filter-summary-chip"><strong><%= item.label %>:</strong> <%= item.value %></span>
+    <% }); %>
+    <a href="/publications<%= publicationsQuery({ search: '', status: '', urgency: '', archived: '', page: 1 }) %>" class="filter-summary-clear">Clear all</a>
+</div>
+<% } %>
+
 <% if (publications.length > 0) { %>
+<div id="publicationBulkBar" class="bulk-actions-bar" style="display:none;">
+    <span><span id="publicationSelectedCount">0</span> selected</span>
+    <% if (!archivedFilter) { %>
+        <button type="button" class="btn btn-sm" onclick="bulkArchivePublications()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
+    <% } else { %>
+        <button type="button" class="btn btn-primary btn-sm" onclick="bulkRestorePublications()"><i class="bi bi-arrow-counterclockwise"></i> Restore Selected</button>
+        <button type="button" class="btn btn-sm" onclick="bulkDeletePublicationsPermanent()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Permanently</button>
+    <% } %>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="clearPublicationSelection()"><i class="bi bi-x-circle"></i> Clear</button>
+</div>
+<div id="publicationBulkHint" class="bulk-hint">Select rows to enable bulk actions.</div>
+<div id="publicationSelectAllNotice" class="select-all-matching" style="display:none;"></div>
+<% if (!archivedFilter) { %>
+<div class="bulk-note">Deleted items are moved to Archive and can be restored.</div>
+<% } %>
+
+<div class="card" style="margin-bottom: 12px;">
+    <div class="card-body" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--gray-700);">
+            <input type="checkbox" id="selectAllPublications" title="Select all publications">
+            Select all (this page)
+        </label>
+        <div class="text-muted">Showing <%= pageStart %>-<%= pageEnd %> of <%= totalPublications %> publication(s)</div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-body" style="padding: 0;">
         <div class="table-container">
             <table>
                 <thead>
                     <tr>
+                        <th style="width: 36px;"></th>
                         <th>Pub #</th>
                         <th>Title</th>
                         <th>Type</th>
@@ -58,6 +134,9 @@
                 <tbody>
                     <% publications.forEach(function(pub) { %>
                     <tr>
+                        <td>
+                            <input type="checkbox" class="publication-checkbox" value="<%= pub.id %>" title="Select publication">
+                        </td>
                         <td><strong><%= pub.publication_number %></strong></td>
                         <td><%= pub.title %></td>
                         <td><%= pub.content_type %></td>
@@ -93,8 +172,8 @@
                                 <a href="/publications/<%= pub.id %>/download" class="btn btn-primary btn-sm" data-bs-toggle="tooltip" title="Download document"><i class="bi bi-download"></i></a>
                             <% } %>
                             <% if (pub.distribution_status === 'Draft') { %>
-                                <form action="/publications/<%= pub.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this publication? This cannot be undone.')">
-                                    <button type="submit" class="btn btn-danger btn-sm" data-bs-toggle="tooltip" title="Delete publication"><i class="bi bi-trash"></i></button>
+                                <form action="/publications/<%= pub.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Archive this publication? You can restore it from the Archive view.')">
+                                    <button type="submit" class="btn btn-danger btn-sm" data-bs-toggle="tooltip" title="Archive publication"><i class="bi bi-trash"></i></button>
                                 </form>
                             <% } %>
                         </td>
@@ -105,15 +184,33 @@
         </div>
     </div>
 </div>
+
+<div class="pagination-bar">
+    <div class="pagination-info">Showing <%= pageStart %>-<%= pageEnd %> of <%= totalPublications %> publication(s)</div>
+    <div class="pagination-controls">
+        <a class="btn btn-secondary btn-sm <%= page <= 1 ? 'disabled' : '' %>" href="/publications<%= publicationsQuery({ page: Math.max(1, page - 1) }) %>">Prev</a>
+        <span>Page <strong><%= page %></strong> of <strong><%= totalPages %></strong></span>
+        <a class="btn btn-secondary btn-sm <%= page >= totalPages ? 'disabled' : '' %>" href="/publications<%= publicationsQuery({ page: Math.min(totalPages, page + 1) }) %>">Next</a>
+    </div>
+    <div class="pagination-size">
+        <label for="publicationPageSize">Rows per page</label>
+        <select id="publicationPageSize" onchange="changePublicationPageSize(this.value)">
+            <option value="10" <%= pageSize === 10 ? 'selected' : '' %>>10</option>
+            <option value="20" <%= pageSize === 20 ? 'selected' : '' %>>20</option>
+            <option value="50" <%= pageSize === 50 ? 'selected' : '' %>>50</option>
+            <option value="100" <%= pageSize === 100 ? 'selected' : '' %>>100</option>
+        </select>
+    </div>
+</div>
 <% } else { %>
 <div class="card">
     <div class="card-body">
         <div class="empty-state">
             <div class="empty-state-icon"><i class="bi bi-file-earmark-text"></i></div>
-            <h3>No publications found</h3>
-            <% if (search || statusFilter || urgencyFilter) { %>
+            <h3><%= archivedFilter ? 'No archived publications found' : 'No publications found' %></h3>
+            <% if (search || statusFilter || urgencyFilter || archivedFilter) { %>
                 <p>No publications match your search criteria.</p>
-                <a href="/publications" class="btn btn-secondary">Clear Filters</a>
+                <a href="/publications<%= publicationsQuery({ search: '', status: '', urgency: '', archived: '', page: 1 }) %>" class="btn btn-secondary">Clear Filters</a>
             <% } else { %>
                 <p>Upload your first publication to begin distributing to customers.</p>
                 <a href="/publications/new" class="btn btn-primary">Upload Publication</a>
@@ -128,6 +225,189 @@ var toast = document.getElementById('toast');
 if (toast) { setTimeout(function() { toast.style.opacity = '0'; setTimeout(function() { toast.remove(); }, 300); }, 5000); }
 // Init Bootstrap tooltips
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
+
+var publicationBulkBar = document.getElementById('publicationBulkBar');
+var publicationBulkHint = document.getElementById('publicationBulkHint');
+var publicationSelectAllNotice = document.getElementById('publicationSelectAllNotice');
+var publicationSelectedCount = document.getElementById('publicationSelectedCount');
+var publicationSelectAll = document.getElementById('selectAllPublications');
+var publicationSelectAllMatching = false;
+var publicationFilters = <%- JSON.stringify({ search: search || '', status: statusFilter || '', urgency: urgencyFilter || '', archived: archivedFilter || '' }) %>;
+var totalPublicationCount = <%= totalPublications || 0 %>;
+
+function getPublicationCheckboxes() {
+    return Array.from(document.querySelectorAll('.publication-checkbox'));
+}
+
+function getEnabledPublicationCheckboxes() {
+    return getPublicationCheckboxes().filter(function(cb) { return !cb.disabled; });
+}
+
+function getCheckedPublications() {
+    return getEnabledPublicationCheckboxes().filter(function(cb) { return cb.checked; });
+}
+
+function getPublicationSelectedCount() {
+    return publicationSelectAllMatching ? totalPublicationCount : getCheckedPublications().length;
+}
+
+function buildPublicationPayload() {
+    if (publicationSelectAllMatching) {
+        return { apply_all: true, filters: publicationFilters };
+    }
+    return {
+        ids: getCheckedPublications().map(function(cb) { return parseInt(cb.value, 10); }).filter(function(v) { return Number.isInteger(v); })
+    };
+}
+
+function updatePublicationSelectionUi() {
+    if (!publicationBulkBar || !publicationSelectedCount) return;
+    var checked = getCheckedPublications();
+    var selectedCount = publicationSelectAllMatching ? totalPublicationCount : checked.length;
+    publicationSelectedCount.textContent = selectedCount;
+    publicationBulkBar.style.display = selectedCount ? 'flex' : 'none';
+    if (publicationBulkHint) publicationBulkHint.style.display = selectedCount ? 'none' : 'block';
+
+    if (!publicationSelectAll) return;
+    var all = getEnabledPublicationCheckboxes();
+    if (!all.length) {
+        publicationSelectAll.checked = false;
+        publicationSelectAll.indeterminate = false;
+    } else {
+        publicationSelectAll.checked = checked.length === all.length;
+        publicationSelectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+    }
+    updatePublicationSelectAllNotice(checked.length, all.length);
+}
+
+function updatePublicationSelectAllNotice(checkedCount, totalOnPage) {
+    if (!publicationSelectAllNotice) return;
+    if (publicationSelectAllMatching) {
+        publicationSelectAllNotice.style.display = 'block';
+        publicationSelectAllNotice.innerHTML = 'All ' + totalPublicationCount + ' matching publication(s) are selected.';
+        return;
+    }
+    if (checkedCount && totalOnPage && checkedCount === totalOnPage && totalPublicationCount > totalOnPage) {
+        publicationSelectAllNotice.style.display = 'block';
+        publicationSelectAllNotice.innerHTML = 'All ' + totalOnPage + ' on this page are selected. ' +
+            '<button type="button" class="link-button" onclick="selectAllMatchingPublications()">Select all ' + totalPublicationCount + ' matching</button>';
+        return;
+    }
+    publicationSelectAllNotice.style.display = 'none';
+    publicationSelectAllNotice.textContent = '';
+}
+
+function selectAllMatchingPublications() {
+    if (!totalPublicationCount) return;
+    publicationSelectAllMatching = true;
+    updatePublicationSelectionUi();
+}
+
+function clearPublicationSelection() {
+    publicationSelectAllMatching = false;
+    getEnabledPublicationCheckboxes().forEach(function(cb) { cb.checked = false; });
+    if (publicationSelectAll) {
+        publicationSelectAll.checked = false;
+        publicationSelectAll.indeterminate = false;
+    }
+    updatePublicationSelectionUi();
+}
+
+function bulkArchivePublications() {
+    var payload = buildPublicationPayload();
+    var count = getPublicationSelectedCount();
+    if (!count) return;
+    if (!confirm('Delete ' + count + ' publication(s)? They will be moved to Archive.')) return;
+
+    fetch('/publications/archive-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+          if (data.success) {
+              location.href = '/publications?success=' + encodeURIComponent('Archived ' + data.count + ' publication(s)');
+          } else {
+              location.href = '/publications?error=' + encodeURIComponent(data.error || 'Archive failed');
+          }
+      })
+      .catch(function() {
+          location.href = '/publications?error=' + encodeURIComponent('Archive failed');
+      });
+}
+
+function bulkRestorePublications() {
+    var payload = buildPublicationPayload();
+    var count = getPublicationSelectedCount();
+    if (!count) return;
+    if (!confirm('Restore ' + count + ' publication(s)?')) return;
+
+    fetch('/publications/restore-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+          if (data.success) {
+              location.href = '/publications?success=' + encodeURIComponent('Restored ' + data.count + ' publication(s)');
+          } else {
+              location.href = '/publications?error=' + encodeURIComponent(data.error || 'Restore failed');
+          }
+      })
+      .catch(function() {
+          location.href = '/publications?error=' + encodeURIComponent('Restore failed');
+      });
+}
+
+function bulkDeletePublicationsPermanent() {
+    var payload = buildPublicationPayload();
+    var count = getPublicationSelectedCount();
+    if (!count) return;
+    if (!confirm('Permanently delete ' + count + ' publication(s)? This cannot be undone.')) return;
+    payload.permanent = true;
+
+    fetch('/publications/delete-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+          if (data.success) {
+              location.href = '/publications?success=' + encodeURIComponent('Deleted ' + data.count + ' publication(s)');
+          } else {
+              location.href = '/publications?error=' + encodeURIComponent(data.error || 'Delete failed');
+          }
+      })
+      .catch(function() {
+          location.href = '/publications?error=' + encodeURIComponent('Delete failed');
+      });
+}
+
+if (publicationSelectAll) {
+    publicationSelectAll.addEventListener('change', function() {
+        publicationSelectAllMatching = false;
+        getEnabledPublicationCheckboxes().forEach(function(cb) { cb.checked = publicationSelectAll.checked; });
+        updatePublicationSelectionUi();
+    });
+}
+
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('publication-checkbox')) {
+        if (publicationSelectAllMatching) {
+            publicationSelectAllMatching = false;
+        }
+        updatePublicationSelectionUi();
+    }
+});
+
+function changePublicationPageSize(size) {
+    var params = new URLSearchParams(window.location.search);
+    params.set('pageSize', size);
+    params.set('page', '1');
+    window.location.search = params.toString();
+}
+
+updatePublicationSelectionUi();
 </script>
 
 </main>

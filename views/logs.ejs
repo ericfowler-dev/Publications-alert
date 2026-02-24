@@ -6,13 +6,19 @@ function logsQuery(overrides) {
     const params = new URLSearchParams();
     const searchValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'search') ? overrides.search : search;
     const urgencyValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'urgency') ? overrides.urgency : urgencyFilter;
+    const archivedValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'archived') ? overrides.archived : archivedFilter;
     const sortValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'sort') ? overrides.sort : sortBy;
     const dirValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'dir') ? overrides.dir : sortDir;
+    const pageValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'page') ? overrides.page : page;
+    const pageSizeValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'pageSize') ? overrides.pageSize : pageSize;
 
     if (searchValue) params.set('search', searchValue);
     if (urgencyValue) params.set('urgency', urgencyValue);
+    if (archivedValue) params.set('archived', archivedValue);
     if (sortValue) params.set('sort', sortValue);
     if (dirValue) params.set('dir', dirValue);
+    if (pageSizeValue) params.set('pageSize', pageSizeValue);
+    if (pageValue && Number(pageValue) > 1) params.set('page', pageValue);
 
     const query = params.toString();
     return query ? ('?' + query) : '';
@@ -38,7 +44,7 @@ function sortArrow(column) {
 <div class="page-header">
     <div>
         <h1>Distribution Logs</h1>
-        <div class="subtitle">Audit trail of all publication notifications &mdash; <%= logs.length %> record(s) in <%= groups.length %> event(s)</div>
+        <div class="subtitle">Audit trail of all publication notifications &mdash; <%= totalLogs %> record(s)<%= archivedFilter ? ' (archived)' : '' %></div>
     </div>
     <div class="page-actions">
         <a href="/logs/export<%= logsQuery({}) %>" class="btn btn-secondary btn-sm" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
@@ -49,21 +55,31 @@ function sortArrow(column) {
     <form method="GET" action="/logs" class="toolbar-search">
         <input type="text" name="search" placeholder="Search by publication, recipient, company, or email..." value="<%= search %>" class="search-input">
         <input type="hidden" name="urgency" value="<%= urgencyFilter %>">
+        <input type="hidden" name="archived" value="<%= archivedFilter %>">
         <input type="hidden" name="sort" value="<%= sortBy %>">
         <input type="hidden" name="dir" value="<%= sortDir %>">
+        <input type="hidden" name="pageSize" value="<%= pageSize %>">
+        <input type="hidden" name="page" value="1">
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
-        <% if (search || urgencyFilter) { %>
-            <a href="/logs<%= logsQuery({ search: '', urgency: '' }) %>" class="btn btn-secondary btn-sm">Clear</a>
+        <% if (search || urgencyFilter || archivedFilter) { %>
+            <a href="/logs<%= logsQuery({ search: '', urgency: '', archived: '', page: 1 }) %>" class="btn btn-secondary btn-sm">Clear</a>
         <% } %>
     </form>
     <div class="filter-group">
         <span class="filter-label">Urgency:</span>
-        <a href="/logs<%= logsQuery({ urgency: 'Critical/Safety' }) %>" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
-        <a href="/logs<%= logsQuery({ urgency: 'High' }) %>" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
-        <a href="/logs<%= logsQuery({ urgency: 'Standard' }) %>" class="filter-pill <%= urgencyFilter === 'Standard' ? 'active' : '' %>">Standard</a>
-        <a href="/logs<%= logsQuery({ urgency: 'Informational' }) %>" class="filter-pill <%= urgencyFilter === 'Informational' ? 'active' : '' %>">Info</a>
+        <a href="/logs<%= logsQuery({ urgency: 'Critical/Safety', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
+        <a href="/logs<%= logsQuery({ urgency: 'High', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'High' ? 'active' : '' %>">High</a>
+        <a href="/logs<%= logsQuery({ urgency: 'Standard', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'Standard' ? 'active' : '' %>">Standard</a>
+        <a href="/logs<%= logsQuery({ urgency: 'Informational', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'Informational' ? 'active' : '' %>">Info</a>
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">View:</span>
+        <a href="/logs<%= logsQuery({ archived: '', page: 1 }) %>" class="filter-pill <%= !archivedFilter ? 'active' : '' %>">Active</a>
+        <a href="/logs<%= logsQuery({ archived: '1', page: 1 }) %>" class="filter-pill <%= archivedFilter ? 'active' : '' %>">Archived</a>
     </div>
     <div class="refresh-controls">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="expandAllGroups()" title="Expand all groups"><i class="bi bi-arrows-angle-expand"></i> Expand All</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="collapseAllGroups()" title="Collapse all groups"><i class="bi bi-arrows-angle-contract"></i> Collapse All</button>
         <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload();" title="Refresh now"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
         <label class="auto-refresh-toggle">
             <input type="checkbox" id="autoRefreshToggle"> Auto (30s)
@@ -71,39 +87,95 @@ function sortArrow(column) {
     </div>
 </div>
 
+<%
+const logFilterChips = [];
+if (search) logFilterChips.push({ label: 'Search', value: search });
+if (urgencyFilter) logFilterChips.push({ label: 'Urgency', value: urgencyFilter });
+if (archivedFilter) logFilterChips.push({ label: 'View', value: 'Archived' });
+%>
+<% if (logFilterChips.length) { %>
+<div class="filter-summary">
+    <span class="filter-summary-label">Active filters:</span>
+    <% logFilterChips.forEach(function(item) { %>
+        <span class="filter-summary-chip"><strong><%= item.label %>:</strong> <%= item.value %></span>
+    <% }); %>
+    <a href="/logs<%= logsQuery({ search: '', urgency: '', archived: '', page: 1 }) %>" class="filter-summary-clear">Clear all</a>
+</div>
+<% } %>
+
 <% if (logs.length > 0) { %>
 <div id="bulkBar" class="bulk-actions-bar" style="display:none;">
     <span><span id="selectedCount">0</span> selected</span>
-    <button type="button" class="btn btn-primary btn-sm" onclick="bulkResend()"><i class="bi bi-arrow-repeat"></i> Resend Selected</button>
-    <button type="button" class="btn btn-sm" onclick="bulkDelete()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
+    <% if (!archivedFilter) { %>
+        <button type="button" class="btn btn-primary btn-sm" onclick="bulkResend()"><i class="bi bi-arrow-repeat"></i> Resend Selected</button>
+        <button type="button" class="btn btn-sm" onclick="bulkArchive()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
+    <% } else { %>
+        <button type="button" class="btn btn-primary btn-sm" onclick="bulkRestore()"><i class="bi bi-arrow-counterclockwise"></i> Restore Selected</button>
+        <button type="button" class="btn btn-sm" onclick="bulkDeletePermanent()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Permanently</button>
+    <% } %>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="copySelectedEmails()"><i class="bi bi-clipboard"></i> Copy Emails</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="exportSelectedLogs()"><i class="bi bi-file-earmark-spreadsheet"></i> Export Selected</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="clearSelection()"><i class="bi bi-x-circle"></i> Clear</button>
 </div>
+<div id="bulkHint" class="bulk-hint">Select rows to enable bulk actions.</div>
+<div id="selectAllMatchingNotice" class="select-all-matching" style="display:none;"></div>
+<% if (!archivedFilter) { %>
+<div class="bulk-note">Deleted items are moved to Archive and can be restored.</div>
+<% } %>
 
-<div class="card">
-    <div class="card-body" style="padding: 0;">
+<div class="card" style="margin-bottom: 12px;">
+    <div class="card-body" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--gray-700);">
+            <input type="checkbox" id="selectAllLogs" title="Select all logs">
+            Select all (this page)
+        </label>
+        <div class="text-muted">Showing <%= pageStart %>-<%= pageEnd %> of <%= totalLogs %> record(s)</div>
+    </div>
+</div>
+
+<% groups.forEach(function(group, groupIndex) { %>
+<div class="card log-group-card" style="margin-bottom: 12px;">
+    <div class="log-group-header" data-group-toggle="log-group-<%= groupIndex %>" data-group-key="<%= group.key %>" role="button" tabindex="0" aria-expanded="false">
+        <div class="log-group-left">
+            <span class="log-group-toggle" aria-hidden="true">▶</span>
+            <strong><%= group.publication_number %></strong>
+            <span class="text-muted"><%= group.publication_title %></span>
+        </div>
+        <div class="log-group-right">
+            <span class="text-muted"><%= group.content_type %></span>
+            <span class="badge badge-<%= group.urgency === 'Critical/Safety' ? 'critical' : group.urgency === 'High' ? 'high' : group.urgency === 'Standard' ? 'standard' : 'informational' %>"><%= group.urgency %></span>
+            <span class="log-group-count"><%= group.entries.length %> recipient<%= group.entries.length === 1 ? '' : 's' %></span>
+            <span class="text-muted">
+                <%= group.sent_date ? new Date(group.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '' %>
+                <% if (group.sent_date) { %>
+                    <span style="margin: 0 4px;">&middot;</span>
+                    <%= new Date(group.sent_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) %>
+                <% } %>
+            </span>
+        </div>
+    </div>
+    <div class="log-group-body" id="log-group-<%= groupIndex %>" style="display: none;">
         <div class="table-container">
-            <table>
+            <table class="log-group-table">
                 <thead>
                     <tr>
-                        <th style="width: 36px;">
-                            <input type="checkbox" id="selectAllLogs" title="Select all logs">
-                        </th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'sent_date', dir: nextSortDir('sent_date') }) %>">Date<%= sortArrow('sent_date') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'publication_number', dir: nextSortDir('publication_number') }) %>">Publication #<%= sortArrow('publication_number') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'publication_title', dir: nextSortDir('publication_title') }) %>">Title<%= sortArrow('publication_title') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'content_type', dir: nextSortDir('content_type') }) %>">Type<%= sortArrow('content_type') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'urgency', dir: nextSortDir('urgency') }) %>">Urgency<%= sortArrow('urgency') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_name', dir: nextSortDir('recipient_name') }) %>">Recipient<%= sortArrow('recipient_name') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_company', dir: nextSortDir('recipient_company') }) %>">Company<%= sortArrow('recipient_company') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_email', dir: nextSortDir('recipient_email') }) %>">Email<%= sortArrow('recipient_email') %></a></th>
-                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'delivery_status', dir: nextSortDir('delivery_status') }) %>">Status<%= sortArrow('delivery_status') %></a></th>
+                        <th style="width: 36px;"></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'sent_date', dir: nextSortDir('sent_date'), page: 1 }) %>">Date<%= sortArrow('sent_date') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'publication_number', dir: nextSortDir('publication_number'), page: 1 }) %>">Publication #<%= sortArrow('publication_number') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'publication_title', dir: nextSortDir('publication_title'), page: 1 }) %>">Title<%= sortArrow('publication_title') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'content_type', dir: nextSortDir('content_type'), page: 1 }) %>">Type<%= sortArrow('content_type') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'urgency', dir: nextSortDir('urgency'), page: 1 }) %>">Urgency<%= sortArrow('urgency') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_name', dir: nextSortDir('recipient_name'), page: 1 }) %>">Recipient<%= sortArrow('recipient_name') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_company', dir: nextSortDir('recipient_company'), page: 1 }) %>">Company<%= sortArrow('recipient_company') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'recipient_email', dir: nextSortDir('recipient_email'), page: 1 }) %>">Email<%= sortArrow('recipient_email') %></a></th>
+                        <th><a class="sort-link" href="/logs<%= logsQuery({ sort: 'delivery_status', dir: nextSortDir('delivery_status'), page: 1 }) %>">Status<%= sortArrow('delivery_status') %></a></th>
                         <th style="width: 70px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <% logs.forEach(function(log) { %>
+                    <% group.entries.forEach(function(log) { %>
                     <tr>
-                        <td><input type="checkbox" class="log-checkbox" value="<%= log.id %>"></td>
+                        <td><input type="checkbox" class="log-checkbox" value="<%= log.id %>" data-email="<%= log.recipient_email %>"></td>
                         <td style="white-space: nowrap;">
                             <%= log.sent_date ? new Date(log.sent_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '' %>
                             <div class="text-muted"><%= log.sent_date ? new Date(log.sent_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '' %></div>
@@ -117,9 +189,11 @@ function sortArrow(column) {
                         <td><%= log.recipient_email %></td>
                         <td><span class="badge badge-<%= log.delivery_status.toLowerCase() %>"><%= log.delivery_status %></span></td>
                         <td class="actions">
-                            <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
-                                <button type="submit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Resend"><i class="bi bi-arrow-repeat"></i></button>
-                            </form>
+                            <% if (!archivedFilter) { %>
+                                <form action="/logs/<%= log.id %>/resend" method="POST" style="display:inline;" onsubmit="return confirm('Resend this notification to <%= log.recipient_name %>?')">
+                                    <button type="submit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Resend"><i class="bi bi-arrow-repeat"></i></button>
+                                </form>
+                            <% } %>
                         </td>
                     </tr>
                     <% }); %>
@@ -128,15 +202,35 @@ function sortArrow(column) {
         </div>
     </div>
 </div>
+<% }); %>
+
+<div class="pagination-bar">
+    <div class="pagination-info">Showing <%= pageStart %>-<%= pageEnd %> of <%= totalLogs %> record(s)</div>
+    <div class="pagination-controls">
+        <a class="btn btn-secondary btn-sm <%= page <= 1 ? 'disabled' : '' %>" href="/logs<%= logsQuery({ page: Math.max(1, page - 1) }) %>">Prev</a>
+        <span>Page <strong><%= page %></strong> of <strong><%= totalPages %></strong></span>
+        <a class="btn btn-secondary btn-sm <%= page >= totalPages ? 'disabled' : '' %>" href="/logs<%= logsQuery({ page: Math.min(totalPages, page + 1) }) %>">Next</a>
+    </div>
+    <div class="pagination-size">
+        <label for="logPageSize">Rows per page</label>
+        <select id="logPageSize" onchange="changeLogPageSize(this.value)">
+            <option value="10" <%= pageSize === 10 ? 'selected' : '' %>>10</option>
+            <option value="25" <%= pageSize === 25 ? 'selected' : '' %>>25</option>
+            <option value="50" <%= pageSize === 50 ? 'selected' : '' %>>50</option>
+            <option value="100" <%= pageSize === 100 ? 'selected' : '' %>>100</option>
+            <option value="200" <%= pageSize === 200 ? 'selected' : '' %>>200</option>
+        </select>
+    </div>
+</div>
 <% } else { %>
 <div class="card">
     <div class="card-body">
         <div class="empty-state">
             <div class="empty-state-icon"><i class="bi bi-clock-history"></i></div>
-            <h3>No distribution logs found</h3>
-            <% if (search || urgencyFilter) { %>
+            <h3><%= archivedFilter ? 'No archived logs found' : 'No distribution logs found' %></h3>
+            <% if (search || urgencyFilter || archivedFilter) { %>
                 <p>No logs match your search criteria.</p>
-                <a href="/logs" class="btn btn-secondary">Clear Filters</a>
+                <a href="/logs<%= logsQuery({ search: '', urgency: '', archived: '', page: 1 }) %>" class="btn btn-secondary">Clear Filters</a>
             <% } else { %>
                 <p>Logs will appear here after publications are distributed to customers.</p>
                 <a href="/publications" class="btn btn-primary">View Publications</a>
@@ -155,6 +249,61 @@ if (toast) {
     }, 5000);
 }
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
+
+var logGroupState = {};
+try {
+    logGroupState = JSON.parse(localStorage.getItem('logGroupState') || '{}');
+} catch (err) {
+    logGroupState = {};
+}
+
+function setGroupState(key, isOpen) {
+    if (!key) return;
+    logGroupState[key] = isOpen;
+    localStorage.setItem('logGroupState', JSON.stringify(logGroupState));
+}
+
+function toggleGroupForHeader(header, forceState) {
+    var targetId = header.getAttribute('data-group-toggle');
+    var body = document.getElementById(targetId);
+    if (!body) return;
+    var currentOpen = body.style.display !== 'none';
+    var nextOpen = typeof forceState === 'boolean' ? forceState : !currentOpen;
+    body.style.display = nextOpen ? 'block' : 'none';
+    header.setAttribute('aria-expanded', String(nextOpen));
+    var icon = header.querySelector('.log-group-toggle');
+    if (icon) icon.textContent = nextOpen ? '▼' : '▶';
+    var key = header.getAttribute('data-group-key');
+    setGroupState(key, nextOpen);
+}
+
+document.querySelectorAll('[data-group-toggle]').forEach(function(header) {
+    var key = header.getAttribute('data-group-key');
+    var initialState = Object.prototype.hasOwnProperty.call(logGroupState, key) ? logGroupState[key] : false;
+    toggleGroupForHeader(header, initialState);
+
+    header.addEventListener('click', function() {
+        toggleGroupForHeader(header);
+    });
+    header.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleGroupForHeader(header);
+        }
+    });
+});
+
+function expandAllGroups() {
+    document.querySelectorAll('[data-group-toggle]').forEach(function(header) {
+        toggleGroupForHeader(header, true);
+    });
+}
+
+function collapseAllGroups() {
+    document.querySelectorAll('[data-group-toggle]').forEach(function(header) {
+        toggleGroupForHeader(header, false);
+    });
+}
 
 var autoRefreshInterval = null;
 var autoRefreshToggle = document.getElementById('autoRefreshToggle');
@@ -185,8 +334,13 @@ function stopAutoRefresh() {
 }
 
 var bulkBar = document.getElementById('bulkBar');
+var bulkHint = document.getElementById('bulkHint');
+var selectAllMatchingNotice = document.getElementById('selectAllMatchingNotice');
 var selectedCountEl = document.getElementById('selectedCount');
 var selectAllLogs = document.getElementById('selectAllLogs');
+var selectAllMatching = false;
+var logFilters = <%- JSON.stringify({ search: search || '', urgency: urgencyFilter || '', archived: archivedFilter || '' }) %>;
+var totalLogCount = <%= totalLogs || 0 %>;
 
 function getSelectedIds() {
     return Array.from(document.querySelectorAll('.log-checkbox:checked'))
@@ -194,24 +348,69 @@ function getSelectedIds() {
         .filter(function(v) { return Number.isInteger(v); });
 }
 
+function getSelectedEmails() {
+    return Array.from(document.querySelectorAll('.log-checkbox:checked'))
+        .map(function(cb) { return cb.dataset.email || ''; })
+        .filter(function(email) { return email; });
+}
+
+function getSelectedCount() {
+    return selectAllMatching ? totalLogCount : getSelectedIds().length;
+}
+
+function buildBulkPayload() {
+    if (selectAllMatching) {
+        return { apply_all: true, filters: logFilters };
+    }
+    return { ids: getSelectedIds() };
+}
+
 function updateBulkBar() {
     if (!bulkBar || !selectedCountEl) return;
     var checked = document.querySelectorAll('.log-checkbox:checked');
-    selectedCountEl.textContent = checked.length;
-    bulkBar.style.display = checked.length ? 'flex' : 'none';
-
-    if (!selectAllLogs) return;
     var all = document.querySelectorAll('.log-checkbox');
-    if (!all.length) {
-        selectAllLogs.checked = false;
-        selectAllLogs.indeterminate = false;
+    var selectedCount = selectAllMatching ? totalLogCount : checked.length;
+    selectedCountEl.textContent = selectedCount;
+    bulkBar.style.display = selectedCount ? 'flex' : 'none';
+    if (bulkHint) bulkHint.style.display = selectedCount ? 'none' : 'block';
+
+    if (selectAllLogs) {
+        if (!all.length) {
+            selectAllLogs.checked = false;
+            selectAllLogs.indeterminate = false;
+        } else {
+            selectAllLogs.checked = checked.length === all.length;
+            selectAllLogs.indeterminate = checked.length > 0 && checked.length < all.length;
+        }
+    }
+    updateSelectAllMatchingNotice(checked.length, all.length);
+}
+
+function updateSelectAllMatchingNotice(checkedCount, totalOnPage) {
+    if (!selectAllMatchingNotice) return;
+    if (selectAllMatching) {
+        selectAllMatchingNotice.style.display = 'block';
+        selectAllMatchingNotice.innerHTML = 'All ' + totalLogCount + ' matching record(s) are selected.';
         return;
     }
-    selectAllLogs.checked = checked.length === all.length;
-    selectAllLogs.indeterminate = checked.length > 0 && checked.length < all.length;
+    if (checkedCount && totalOnPage && checkedCount === totalOnPage && totalLogCount > totalOnPage) {
+        selectAllMatchingNotice.style.display = 'block';
+        selectAllMatchingNotice.innerHTML = 'All ' + totalOnPage + ' on this page are selected. ' +
+            '<button type="button" class="link-button" onclick="selectAllMatchingLogs()">Select all ' + totalLogCount + ' matching</button>';
+        return;
+    }
+    selectAllMatchingNotice.style.display = 'none';
+    selectAllMatchingNotice.textContent = '';
+}
+
+function selectAllMatchingLogs() {
+    if (!totalLogCount) return;
+    selectAllMatching = true;
+    updateBulkBar();
 }
 
 function clearSelection() {
+    selectAllMatching = false;
     document.querySelectorAll('.log-checkbox').forEach(function(cb) { cb.checked = false; });
     if (selectAllLogs) {
         selectAllLogs.checked = false;
@@ -221,6 +420,10 @@ function clearSelection() {
 }
 
 function bulkResend() {
+    if (selectAllMatching) {
+        alert('Bulk resend requires a specific selection. Deselect "select all matching" first.');
+        return;
+    }
     var ids = getSelectedIds();
     if (!ids.length) return;
     if (!confirm('Resend ' + ids.length + ' notification(s)?')) return;
@@ -240,14 +443,58 @@ function bulkResend() {
     });
 }
 
-function bulkDelete() {
-    var ids = getSelectedIds();
-    if (!ids.length) return;
-    if (!confirm('Permanently delete ' + ids.length + ' log record(s)? This cannot be undone.')) return;
+function bulkArchive() {
+    var payload = buildBulkPayload();
+    var count = getSelectedCount();
+    if (!count) return;
+    if (!confirm('Delete ' + count + ' log record(s)? They will be moved to Archive.')) return;
+    fetch('/logs/archive-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.success) {
+            location.href = '/logs?success=' + encodeURIComponent('Archived ' + data.count + ' log record(s)');
+        } else {
+            location.href = '/logs?error=' + encodeURIComponent(data.error || 'Archive failed');
+        }
+    }).catch(function() {
+        location.href = '/logs?error=' + encodeURIComponent('Archive failed');
+    });
+}
+
+function bulkRestore() {
+    var payload = buildBulkPayload();
+    var count = getSelectedCount();
+    if (!count) return;
+    if (!confirm('Restore ' + count + ' log record(s)?')) return;
+    fetch('/logs/restore-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.success) {
+            location.href = '/logs?success=' + encodeURIComponent('Restored ' + data.count + ' log record(s)');
+        } else {
+            location.href = '/logs?error=' + encodeURIComponent(data.error || 'Restore failed');
+        }
+    }).catch(function() {
+        location.href = '/logs?error=' + encodeURIComponent('Restore failed');
+    });
+}
+
+function bulkDeletePermanent() {
+    var payload = buildBulkPayload();
+    var count = getSelectedCount();
+    if (!count) return;
+    if (!confirm('Permanently delete ' + count + ' log record(s)? This cannot be undone.')) return;
+    payload.permanent = true;
     fetch('/logs/delete-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: ids })
+        body: JSON.stringify(payload)
     }).then(function(res) { return res.json(); })
       .then(function(data) {
         if (data.success) {
@@ -260,8 +507,45 @@ function bulkDelete() {
     });
 }
 
+function copySelectedEmails() {
+    if (selectAllMatching) {
+        alert('Copy Emails is only available for a specific selection. Deselect "select all matching" first.');
+        return;
+    }
+    var emails = getSelectedEmails();
+    if (!emails.length) return;
+    var unique = Array.from(new Set(emails));
+    var text = unique.join(', ');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            alert('Copied ' + unique.length + ' email(s) to clipboard.');
+        }).catch(function() {
+            prompt('Copy emails:', text);
+        });
+    } else {
+        prompt('Copy emails:', text);
+    }
+}
+
+function exportSelectedLogs() {
+    var count = getSelectedCount();
+    if (!count) return;
+    if (selectAllMatching) {
+        var params = new URLSearchParams();
+        params.set('apply_all', '1');
+        if (logFilters.search) params.set('search', logFilters.search);
+        if (logFilters.urgency) params.set('urgency', logFilters.urgency);
+        if (logFilters.archived) params.set('archived', logFilters.archived);
+        window.location.href = '/logs/export-selected?' + params.toString();
+        return;
+    }
+    var ids = getSelectedIds().join(',');
+    window.location.href = '/logs/export-selected?ids=' + encodeURIComponent(ids);
+}
+
 if (selectAllLogs) {
     selectAllLogs.addEventListener('change', function() {
+        selectAllMatching = false;
         document.querySelectorAll('.log-checkbox').forEach(function(cb) { cb.checked = selectAllLogs.checked; });
         updateBulkBar();
     });
@@ -269,9 +553,19 @@ if (selectAllLogs) {
 
 document.addEventListener('change', function(e) {
     if (e.target.classList.contains('log-checkbox')) {
+        if (selectAllMatching) {
+            selectAllMatching = false;
+        }
         updateBulkBar();
     }
 });
+
+function changeLogPageSize(size) {
+    var params = new URLSearchParams(window.location.search);
+    params.set('pageSize', size);
+    params.set('page', '1');
+    window.location.search = params.toString();
+}
 
 updateBulkBar();
 </script>

@@ -11,6 +11,10 @@ const ExcelJS = require('exceljs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const LOG_ARCHIVE_DAYS = parseInt(process.env.LOG_ARCHIVE_DAYS || '180', 10) || 180;
+const LOG_ARCHIVE_ENABLED = String(process.env.LOG_ARCHIVE_ENABLED || 'true').toLowerCase() !== 'false';
+const LOG_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const EXPORT_DIR = path.join(__dirname, 'exports');
 
 // Database setup - persistent disk on Render, local in development
 const DB_PATH = process.env.NODE_ENV === 'production' ? '/data/publications.db' : './publications.db';
@@ -62,7 +66,9 @@ function initDatabase() {
       date_published DATETIME,
       recipients_count INTEGER DEFAULT 0,
       file_path TEXT,
-      file_name TEXT
+      file_name TEXT,
+      is_archived INTEGER DEFAULT 0,
+      archived_at DATETIME
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS distribution_logs (
@@ -78,7 +84,9 @@ function initDatabase() {
       delivery_status TEXT DEFAULT 'Sent',
       acknowledged INTEGER DEFAULT 0,
       acknowledgment_date DATETIME,
-      match_reason TEXT
+      match_reason TEXT,
+      is_archived INTEGER DEFAULT 0,
+      archived_at DATETIME
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS metadata (
@@ -89,6 +97,21 @@ function initDatabase() {
       is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    function addColumnIfMissing(table, column, definition) {
+      db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
+        if (err) return;
+        const hasColumn = (rows || []).some(row => row.name === column);
+        if (!hasColumn) {
+          db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+        }
+      });
+    }
+
+    addColumnIfMissing('publications', 'is_archived', 'INTEGER DEFAULT 0');
+    addColumnIfMissing('publications', 'archived_at', 'DATETIME');
+    addColumnIfMissing('distribution_logs', 'is_archived', 'INTEGER DEFAULT 0');
+    addColumnIfMissing('distribution_logs', 'archived_at', 'DATETIME');
 
     // Migrate old "Comprehensive" tier to "All Announcements"
     db.run("UPDATE customers SET subscription_tier = 'All Announcements' WHERE subscription_tier = 'Comprehensive'");
@@ -138,6 +161,7 @@ function initDatabase() {
       }
     });
   });
+  scheduleLogArchive();
 }
 
 // Helper: fetch active metadata grouped by category
@@ -155,6 +179,12 @@ function getMetadata() {
       resolve(grouped);
     });
   });
+}
+
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
 }
 
 // Helper: promisified db queries
@@ -178,6 +208,117 @@ function toSortDir(value, fallback = 'asc') {
   const normalized = String(value || '').toLowerCase();
   if (normalized === 'asc' || normalized === 'desc') return normalized;
   return fallback;
+}
+
+function parseBoolean(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+}
+
+function clampNumber(value, min, max, fallback) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
+function buildPublicationFilters(filters) {
+  const whereParams = [];
+  let whereSql = 'WHERE 1=1';
+  if (filters.search) {
+    whereSql += ' AND (title LIKE ? OR publication_number LIKE ?)';
+    const s = `%${filters.search}%`;
+    whereParams.push(s, s);
+  }
+  if (filters.status) {
+    whereSql += ' AND distribution_status = ?';
+    whereParams.push(filters.status);
+  }
+  if (filters.urgency) {
+    whereSql += ' AND urgency = ?';
+    whereParams.push(filters.urgency);
+  }
+  return { whereSql, whereParams };
+}
+
+function buildLogFilters(filters) {
+  const whereParams = [];
+  let whereSql = 'WHERE 1=1';
+  if (filters.search) {
+    whereSql += ' AND (publication_number LIKE ? OR publication_title LIKE ? OR recipient_name LIKE ? OR recipient_company LIKE ? OR recipient_email LIKE ?)';
+    const s = `%${filters.search}%`;
+    whereParams.push(s, s, s, s, s);
+  }
+  if (filters.urgency) {
+    whereSql += ' AND urgency = ?';
+    whereParams.push(filters.urgency);
+  }
+  return { whereSql, whereParams };
+}
+
+async function archiveOldLogs() {
+  if (!LOG_ARCHIVE_ENABLED) return;
+  try {
+    ensureDir(EXPORT_DIR);
+    const cutoff = `-${LOG_ARCHIVE_DAYS} days`;
+    const logs = await dbAll(
+      `SELECT * FROM distribution_logs
+       WHERE (is_archived IS NULL OR is_archived = 0)
+         AND sent_date <= datetime('now', ?)`,
+      [cutoff]
+    );
+    if (!logs.length) return;
+
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const fileName = `distribution-logs-archive-${fileDate}.xlsx`;
+    const filePath = path.join(EXPORT_DIR, fileName);
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Archived Logs');
+    sheet.columns = [
+      { header: 'Sent Date', key: 'sent_date', width: 22 },
+      { header: 'Publication #', key: 'publication_number', width: 16 },
+      { header: 'Title', key: 'publication_title', width: 40 },
+      { header: 'Type', key: 'content_type', width: 18 },
+      { header: 'Urgency', key: 'urgency', width: 16 },
+      { header: 'Recipient', key: 'recipient_name', width: 22 },
+      { header: 'Company', key: 'recipient_company', width: 24 },
+      { header: 'Email', key: 'recipient_email', width: 28 },
+      { header: 'Status', key: 'delivery_status', width: 14 },
+      { header: 'Match Reason', key: 'match_reason', width: 40 }
+    ];
+    logs.forEach(log => {
+      sheet.addRow({
+        sent_date: log.sent_date ? new Date(log.sent_date).toLocaleString() : '',
+        publication_number: log.publication_number,
+        publication_title: log.publication_title,
+        content_type: log.content_type,
+        urgency: log.urgency,
+        recipient_name: log.recipient_name,
+        recipient_company: log.recipient_company,
+        recipient_email: log.recipient_email,
+        delivery_status: log.delivery_status,
+        match_reason: log.match_reason || ''
+      });
+    });
+    await workbook.xlsx.writeFile(filePath);
+
+    await dbRun(
+      `UPDATE distribution_logs
+       SET is_archived = 1, archived_at = datetime('now')
+       WHERE (is_archived IS NULL OR is_archived = 0)
+         AND sent_date <= datetime('now', ?)`,
+      [cutoff]
+    );
+    console.log(`Archived ${logs.length} log(s) to ${filePath}`);
+  } catch (err) {
+    console.error('Archive old logs error:', err);
+  }
+}
+
+function scheduleLogArchive() {
+  if (!LOG_ARCHIVE_ENABLED) return;
+  ensureDir(EXPORT_DIR);
+  archiveOldLogs();
+  setInterval(archiveOldLogs, LOG_ARCHIVE_INTERVAL_MS);
 }
 
 // Middleware
@@ -528,8 +669,16 @@ app.post('/customers/delete-bulk', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'No customers selected' });
     }
     const placeholders = ids.map(() => '?').join(',');
-    const result = await dbRun(`DELETE FROM customers WHERE id IN (${placeholders})`, ids);
-    res.json({ success: true, count: result.changes || ids.length });
+    const rows = await dbAll(`SELECT id, customer_type FROM customers WHERE id IN (${placeholders})`, ids);
+    const deletable = rows.filter(row => String(row.customer_type || '').toLowerCase() !== 'internal');
+    const skipped = rows.length - deletable.length;
+    if (!deletable.length) {
+      return res.status(400).json({ error: 'Internal customers cannot be deleted' });
+    }
+    const deleteIds = deletable.map(row => row.id);
+    const deletePlaceholders = deleteIds.map(() => '?').join(',');
+    const result = await dbRun(`DELETE FROM customers WHERE id IN (${deletePlaceholders})`, deleteIds);
+    res.json({ success: true, count: result.changes || deleteIds.length, skipped });
   } catch (err) {
     console.error('Delete customers error:', err);
     res.status(500).json({ error: 'Failed to delete customers' });
@@ -586,31 +735,39 @@ app.post('/customers/:id/delete', (req, res) => {
 
 app.get('/publications', async (req, res) => {
   try {
-    const { search, status, urgency } = req.query;
-    let sql = 'SELECT * FROM publications WHERE 1=1';
-    const params = [];
+    const { search, status, urgency, archived, page, pageSize } = req.query;
+    const showArchived = parseBoolean(archived);
+    const filterParts = buildPublicationFilters({ search, status, urgency });
+    let whereSql = filterParts.whereSql;
+    const whereParams = filterParts.whereParams;
+    if (showArchived) {
+      whereSql += ' AND is_archived = 1';
+    } else {
+      whereSql += ' AND (is_archived IS NULL OR is_archived = 0)';
+    }
 
-    if (search) {
-      sql += ' AND (title LIKE ? OR publication_number LIKE ?)';
-      const s = `%${search}%`;
-      params.push(s, s);
-    }
-    if (status) {
-      sql += ' AND distribution_status = ?';
-      params.push(status);
-    }
-    if (urgency) {
-      sql += ' AND urgency = ?';
-      params.push(urgency);
-    }
-    sql += ' ORDER BY id DESC';
+    const totalRow = await dbGet(`SELECT COUNT(*) as c FROM publications ${whereSql}`, whereParams);
+    const totalPublications = totalRow ? totalRow.c : 0;
+    const perPage = clampNumber(pageSize, 10, 100, 20);
+    const totalPages = Math.max(1, Math.ceil(totalPublications / perPage));
+    const currentPage = clampNumber(page, 1, totalPages, 1);
+    const offset = (currentPage - 1) * perPage;
 
-    const publications = await dbAll(sql, params);
+    const listParams = whereParams.slice();
+    listParams.push(perPage, offset);
+    const publications = await dbAll(`SELECT * FROM publications ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`, listParams);
     res.render('publications', {
       publications,
       search: search || '',
       statusFilter: status || '',
       urgencyFilter: urgency || '',
+      archivedFilter: showArchived ? '1' : '',
+      page: currentPage,
+      pageSize: perPage,
+      totalPublications,
+      totalPages,
+      pageStart: totalPublications ? offset + 1 : 0,
+      pageEnd: Math.min(offset + perPage, totalPublications),
       success: req.query.success || '',
       error: req.query.error || ''
     });
@@ -660,6 +817,145 @@ app.get('/publications/:id/edit', async (req, res) => {
   }
 });
 
+app.post('/publications/archive-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids, apply_all, filters } = req.body || {};
+    if (parseBoolean(apply_all)) {
+      const { whereSql, whereParams } = buildPublicationFilters({
+        search: filters && filters.search,
+        status: filters && filters.status,
+        urgency: filters && filters.urgency
+      });
+      const result = await dbRun(
+        `UPDATE publications
+         SET is_archived = 1, archived_at = datetime("now")
+         ${whereSql} AND (is_archived IS NULL OR is_archived = 0)`,
+        whereParams
+      );
+      return res.json({ success: true, count: result.changes || 0 });
+    }
+
+    const parsedIds = Array.isArray(ids)
+      ? ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    if (!parsedIds.length) {
+      return res.status(400).json({ error: 'No publications selected' });
+    }
+    const placeholders = parsedIds.map(() => '?').join(',');
+    const result = await dbRun(
+      `UPDATE publications
+       SET is_archived = 1, archived_at = datetime("now")
+       WHERE id IN (${placeholders})`,
+      parsedIds
+    );
+    res.json({ success: true, count: result.changes || parsedIds.length });
+  } catch (err) {
+    console.error('Archive publications error:', err);
+    res.status(500).json({ error: 'Failed to archive publications' });
+  }
+});
+
+app.post('/publications/restore-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids, apply_all, filters } = req.body || {};
+    if (parseBoolean(apply_all)) {
+      const { whereSql, whereParams } = buildPublicationFilters({
+        search: filters && filters.search,
+        status: filters && filters.status,
+        urgency: filters && filters.urgency
+      });
+      const result = await dbRun(
+        `UPDATE publications
+         SET is_archived = 0, archived_at = NULL
+         ${whereSql} AND is_archived = 1`,
+        whereParams
+      );
+      return res.json({ success: true, count: result.changes || 0 });
+    }
+
+    const parsedIds = Array.isArray(ids)
+      ? ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    if (!parsedIds.length) {
+      return res.status(400).json({ error: 'No publications selected' });
+    }
+    const placeholders = parsedIds.map(() => '?').join(',');
+    const result = await dbRun(
+      `UPDATE publications SET is_archived = 0, archived_at = NULL WHERE id IN (${placeholders})`,
+      parsedIds
+    );
+    res.json({ success: true, count: result.changes || parsedIds.length });
+  } catch (err) {
+    console.error('Restore publications error:', err);
+    res.status(500).json({ error: 'Failed to restore publications' });
+  }
+});
+
+app.post('/publications/delete-bulk', express.json(), async (req, res) => {
+  try {
+    const permanent = parseBoolean(req.body.permanent);
+    if (!permanent) {
+      return res.status(400).json({ error: 'Permanent delete requires confirmation' });
+    }
+
+    const ids = Array.isArray(req.body.ids)
+      ? req.body.ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    const applyAll = parseBoolean(req.body.apply_all);
+
+    if (applyAll) {
+      const filters = req.body.filters || {};
+      const { whereSql, whereParams } = buildPublicationFilters({
+        search: filters.search,
+        status: filters.status,
+        urgency: filters.urgency
+      });
+      const rows = await dbAll(
+        `SELECT id, file_path FROM publications ${whereSql} AND is_archived = 1`,
+        whereParams
+      );
+      if (!rows.length) {
+        return res.status(400).json({ error: 'No archived publications selected' });
+      }
+      rows.forEach(pub => {
+        if (pub.file_path && fs.existsSync(pub.file_path)) {
+          fs.unlinkSync(pub.file_path);
+        }
+      });
+      const deleteIds = rows.map(pub => pub.id);
+      const deletePlaceholders = deleteIds.map(() => '?').join(',');
+      const result = await dbRun(`DELETE FROM publications WHERE id IN (${deletePlaceholders})`, deleteIds);
+      return res.json({ success: true, count: result.changes || deleteIds.length });
+    }
+
+    if (!ids.length) {
+      return res.status(400).json({ error: 'No publications selected' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await dbAll(`SELECT id, is_archived, file_path FROM publications WHERE id IN (${placeholders})`, ids);
+    const deletable = rows.filter(row => row.is_archived === 1);
+
+    if (!deletable.length) {
+      return res.status(400).json({ error: 'Only archived publications can be permanently deleted' });
+    }
+
+    deletable.forEach(pub => {
+      if (pub.file_path && fs.existsSync(pub.file_path)) {
+        fs.unlinkSync(pub.file_path);
+      }
+    });
+
+    const deleteIds = deletable.map(pub => pub.id);
+    const deletePlaceholders = deleteIds.map(() => '?').join(',');
+    const result = await dbRun(`DELETE FROM publications WHERE id IN (${deletePlaceholders})`, deleteIds);
+    res.json({ success: true, count: result.changes || deleteIds.length });
+  } catch (err) {
+    console.error('Delete publications error:', err);
+    res.status(500).json({ error: 'Failed to delete publications' });
+  }
+});
+
 app.post('/publications/:id', upload.single('document'), async (req, res) => {
   try {
     const id = req.params.id;
@@ -685,14 +981,10 @@ app.post('/publications/:id', upload.single('document'), async (req, res) => {
 
 app.post('/publications/:id/delete', async (req, res) => {
   try {
-    const pub = await dbGet('SELECT * FROM publications WHERE id = ?', [req.params.id]);
-    if (pub && pub.file_path && fs.existsSync(pub.file_path)) {
-      fs.unlinkSync(pub.file_path);
-    }
-    await dbRun('DELETE FROM publications WHERE id = ?', [req.params.id]);
-    res.redirect('/publications?success=' + encodeURIComponent('Publication deleted successfully'));
+    await dbRun('UPDATE publications SET is_archived = 1, archived_at = datetime("now") WHERE id = ?', [req.params.id]);
+    res.redirect('/publications?success=' + encodeURIComponent('Publication archived successfully'));
   } catch (err) {
-    res.redirect('/publications?error=' + encodeURIComponent('Error deleting publication'));
+    res.redirect('/publications?error=' + encodeURIComponent('Error archiving publication'));
   }
 });
 
@@ -1143,7 +1435,8 @@ function logDistribution(publication, customer) {
 
 app.get('/logs', async (req, res) => {
   try {
-    const { search, urgency, sort, dir } = req.query;
+    const { search, urgency, sort, dir, archived, page, pageSize } = req.query;
+    const showArchived = parseBoolean(archived);
     const logSortColumns = {
       sent_date: 'sent_date',
       publication_number: 'publication_number',
@@ -1158,21 +1451,30 @@ app.get('/logs', async (req, res) => {
     const sortBy = logSortColumns[sort] ? sort : 'sent_date';
     const sortDir = toSortDir(dir, 'desc');
 
-    let sql = 'SELECT * FROM distribution_logs WHERE 1=1';
-    const params = [];
-
-    if (search) {
-      sql += ' AND (publication_number LIKE ? OR publication_title LIKE ? OR recipient_name LIKE ? OR recipient_company LIKE ? OR recipient_email LIKE ?)';
-      const s = `%${search}%`;
-      params.push(s, s, s, s, s);
+    const filterParts = buildLogFilters({ search, urgency });
+    let whereSql = filterParts.whereSql;
+    const whereParams = filterParts.whereParams;
+    if (showArchived) {
+      whereSql += ' AND is_archived = 1';
+    } else {
+      whereSql += ' AND (is_archived IS NULL OR is_archived = 0)';
     }
-    if (urgency) {
-      sql += ' AND urgency = ?';
-      params.push(urgency);
-    }
-    sql += ` ORDER BY ${logSortColumns[sortBy]} ${sortDir.toUpperCase()}, id DESC`;
 
-    const logs = await dbAll(sql, params);
+    const totalRow = await dbGet(`SELECT COUNT(*) as c FROM distribution_logs ${whereSql}`, whereParams);
+    const totalLogs = totalRow ? totalRow.c : 0;
+    const perPage = clampNumber(pageSize, 10, 200, 25);
+    const totalPages = Math.max(1, Math.ceil(totalLogs / perPage));
+    const currentPage = clampNumber(page, 1, totalPages, 1);
+    const offset = (currentPage - 1) * perPage;
+
+    const listParams = whereParams.slice();
+    listParams.push(perPage, offset);
+    const logs = await dbAll(
+      `SELECT * FROM distribution_logs ${whereSql}
+       ORDER BY ${logSortColumns[sortBy]} ${sortDir.toUpperCase()}, id DESC
+       LIMIT ? OFFSET ?`,
+      listParams
+    );
 
     // Group logs by distribution event (same publication_number + same sent_date rounded to the minute)
     const groups = [];
@@ -1200,8 +1502,15 @@ app.get('/logs', async (req, res) => {
       groups,
       search: search || '',
       urgencyFilter: urgency || '',
+      archivedFilter: showArchived ? '1' : '',
       sortBy,
       sortDir,
+      page: currentPage,
+      pageSize: perPage,
+      totalLogs,
+      totalPages,
+      pageStart: totalLogs ? offset + 1 : 0,
+      pageEnd: Math.min(offset + perPage, totalLogs),
       success: req.query.success || '',
       error: req.query.error || ''
     });
@@ -1211,16 +1520,121 @@ app.get('/logs', async (req, res) => {
   }
 });
 
-// Delete selected log entries
+app.post('/logs/archive-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids, apply_all, filters } = req.body || {};
+    if (parseBoolean(apply_all)) {
+      const { whereSql, whereParams } = buildLogFilters({
+        search: filters && filters.search,
+        urgency: filters && filters.urgency
+      });
+      const result = await dbRun(
+        `UPDATE distribution_logs
+         SET is_archived = 1, archived_at = datetime("now")
+         ${whereSql} AND (is_archived IS NULL OR is_archived = 0)`,
+        whereParams
+      );
+      return res.json({ success: true, count: result.changes || 0 });
+    }
+
+    const parsedIds = Array.isArray(ids)
+      ? ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    if (!parsedIds.length) {
+      return res.status(400).json({ error: 'No log entries selected' });
+    }
+    const placeholders = parsedIds.map(() => '?').join(',');
+    const result = await dbRun(
+      `UPDATE distribution_logs
+       SET is_archived = 1, archived_at = datetime("now")
+       WHERE id IN (${placeholders})`,
+      parsedIds
+    );
+    res.json({ success: true, count: result.changes || parsedIds.length });
+  } catch (err) {
+    console.error('Archive logs error:', err);
+    res.status(500).json({ error: 'Failed to archive logs' });
+  }
+});
+
+app.post('/logs/restore-bulk', express.json(), async (req, res) => {
+  try {
+    const { ids, apply_all, filters } = req.body || {};
+    if (parseBoolean(apply_all)) {
+      const { whereSql, whereParams } = buildLogFilters({
+        search: filters && filters.search,
+        urgency: filters && filters.urgency
+      });
+      const result = await dbRun(
+        `UPDATE distribution_logs
+         SET is_archived = 0, archived_at = NULL
+         ${whereSql} AND is_archived = 1`,
+        whereParams
+      );
+      return res.json({ success: true, count: result.changes || 0 });
+    }
+
+    const parsedIds = Array.isArray(ids)
+      ? ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    if (!parsedIds.length) {
+      return res.status(400).json({ error: 'No log entries selected' });
+    }
+    const placeholders = parsedIds.map(() => '?').join(',');
+    const result = await dbRun(
+      `UPDATE distribution_logs SET is_archived = 0, archived_at = NULL WHERE id IN (${placeholders})`,
+      parsedIds
+    );
+    res.json({ success: true, count: result.changes || parsedIds.length });
+  } catch (err) {
+    console.error('Restore logs error:', err);
+    res.status(500).json({ error: 'Failed to restore logs' });
+  }
+});
+
+// Delete selected log entries (permanent)
 app.post('/logs/delete-bulk', express.json(), async (req, res) => {
   try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
+    const permanent = parseBoolean(req.body.permanent);
+    if (!permanent) {
+      return res.status(400).json({ error: 'Permanent delete requires confirmation' });
+    }
+    const applyAll = parseBoolean(req.body.apply_all);
+    if (applyAll) {
+      const filters = req.body.filters || {};
+      const { whereSql, whereParams } = buildLogFilters({
+        search: filters.search,
+        urgency: filters.urgency
+      });
+      const rows = await dbAll(
+        `SELECT id FROM distribution_logs ${whereSql} AND is_archived = 1`,
+        whereParams
+      );
+      if (!rows.length) {
+        return res.status(400).json({ error: 'No archived log entries selected' });
+      }
+      const ids = rows.map(row => row.id);
+      const placeholders = ids.map(() => '?').join(',');
+      await dbRun(`DELETE FROM distribution_logs WHERE id IN (${placeholders})`, ids);
+      return res.json({ success: true, count: ids.length });
+    }
+
+    const ids = Array.isArray(req.body.ids)
+      ? req.body.ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    if (!ids.length) {
       return res.status(400).json({ error: 'No log entries selected' });
     }
     const placeholders = ids.map(() => '?').join(',');
-    await dbRun(`DELETE FROM distribution_logs WHERE id IN (${placeholders})`, ids);
-    res.json({ success: true, count: ids.length });
+    const rows = await dbAll(`SELECT id, is_archived FROM distribution_logs WHERE id IN (${placeholders})`, ids);
+    const deletable = rows.filter(row => row.is_archived === 1);
+    if (!deletable.length) {
+      return res.status(400).json({ error: 'Only archived logs can be permanently deleted' });
+    }
+    const deleteIds = deletable.map(row => row.id);
+    const deletePlaceholders = deleteIds.map(() => '?').join(',');
+    await dbRun(`DELETE FROM distribution_logs WHERE id IN (${deletePlaceholders})`, deleteIds);
+    res.json({ success: true, count: deleteIds.length });
   } catch (err) {
     console.error('Delete logs error:', err);
     res.status(500).json({ error: 'Failed to delete logs' });
@@ -1230,7 +1644,8 @@ app.post('/logs/delete-bulk', express.json(), async (req, res) => {
 // Export logs to Excel
 app.get('/logs/export', async (req, res) => {
   try {
-    const { search, urgency, sort, dir } = req.query;
+    const { search, urgency, sort, dir, archived } = req.query;
+    const showArchived = parseBoolean(archived);
     const logSortColumns = {
       sent_date: 'sent_date',
       publication_number: 'publication_number',
@@ -1245,19 +1660,19 @@ app.get('/logs/export', async (req, res) => {
     const sortBy = logSortColumns[sort] ? sort : 'sent_date';
     const sortDir = toSortDir(dir, 'desc');
 
-    let sql = 'SELECT * FROM distribution_logs WHERE 1=1';
-    const params = [];
-    if (search) {
-      sql += ' AND (publication_number LIKE ? OR publication_title LIKE ? OR recipient_name LIKE ? OR recipient_company LIKE ? OR recipient_email LIKE ?)';
-      const s = `%${search}%`;
-      params.push(s, s, s, s, s);
+    const filterParts = buildLogFilters({ search, urgency });
+    let whereSql = filterParts.whereSql;
+    const whereParams = filterParts.whereParams;
+    if (showArchived) {
+      whereSql += ' AND is_archived = 1';
+    } else {
+      whereSql += ' AND (is_archived IS NULL OR is_archived = 0)';
     }
-    if (urgency) {
-      sql += ' AND urgency = ?';
-      params.push(urgency);
-    }
-    sql += ` ORDER BY ${logSortColumns[sortBy]} ${sortDir.toUpperCase()}, id DESC`;
-    const logs = await dbAll(sql, params);
+    const logs = await dbAll(
+      `SELECT * FROM distribution_logs ${whereSql}
+       ORDER BY ${logSortColumns[sortBy]} ${sortDir.toUpperCase()}, id DESC`,
+      whereParams
+    );
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Distribution Logs');
@@ -1305,6 +1720,86 @@ app.get('/logs/export', async (req, res) => {
   }
 });
 
+app.get('/logs/export-selected', async (req, res) => {
+  try {
+    const applyAll = parseBoolean(req.query.apply_all);
+    let logs = [];
+
+    if (applyAll) {
+      const { search, urgency, archived } = req.query;
+      const showArchived = parseBoolean(archived);
+      const filterParts = buildLogFilters({ search, urgency });
+      let whereSql = filterParts.whereSql;
+      const whereParams = filterParts.whereParams;
+      if (showArchived) {
+        whereSql += ' AND is_archived = 1';
+      } else {
+        whereSql += ' AND (is_archived IS NULL OR is_archived = 0)';
+      }
+      logs = await dbAll(
+        `SELECT * FROM distribution_logs ${whereSql} ORDER BY sent_date DESC, id DESC`,
+        whereParams
+      );
+    } else {
+      const ids = String(req.query.ids || '')
+        .split(',')
+        .map(id => parseInt(id, 10))
+        .filter(Number.isInteger);
+      if (!ids.length) {
+        return res.status(400).send('No log entries selected');
+      }
+      const placeholders = ids.map(() => '?').join(',');
+      logs = await dbAll(`SELECT * FROM distribution_logs WHERE id IN (${placeholders})`, ids);
+    }
+
+    if (!logs.length) {
+      return res.status(400).send('No log entries selected');
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Selected Logs');
+    sheet.columns = [
+      { header: 'Date', key: 'sent_date', width: 20 },
+      { header: 'Publication #', key: 'publication_number', width: 16 },
+      { header: 'Title', key: 'publication_title', width: 35 },
+      { header: 'Type', key: 'content_type', width: 18 },
+      { header: 'Urgency', key: 'urgency', width: 14 },
+      { header: 'Recipient', key: 'recipient_name', width: 22 },
+      { header: 'Company', key: 'recipient_company', width: 22 },
+      { header: 'Email', key: 'recipient_email', width: 28 },
+      { header: 'Status', key: 'delivery_status', width: 12 },
+      { header: 'Match Reason', key: 'match_reason', width: 20 }
+    ];
+
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    logs.forEach(log => {
+      sheet.addRow({
+        sent_date: log.sent_date ? new Date(log.sent_date).toLocaleString() : '',
+        publication_number: log.publication_number,
+        publication_title: log.publication_title,
+        content_type: log.content_type,
+        urgency: log.urgency,
+        recipient_name: log.recipient_name,
+        recipient_company: log.recipient_company,
+        recipient_email: log.recipient_email,
+        delivery_status: log.delivery_status,
+        match_reason: log.match_reason || ''
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=distribution-logs-selected-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Export selected logs error:', err);
+    res.status(500).send('Export failed');
+  }
+});
+
 // Resend a distribution email
 app.post('/logs/:id/resend', async (req, res) => {
   try {
@@ -1336,6 +1831,9 @@ app.post('/logs/:id/resend', async (req, res) => {
 // Bulk resend multiple log entries
 app.post('/logs/resend-bulk', express.json(), async (req, res) => {
   try {
+    if (parseBoolean(req.body.apply_all)) {
+      return res.status(400).json({ error: 'Bulk resend requires explicit selection' });
+    }
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'No log entries selected' });
