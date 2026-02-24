@@ -44,6 +44,10 @@ function sortArrow(column) {
     </div>
     <div class="actions">
         <a href="/customers/export<%= customersQuery({}) %>" class="btn btn-secondary"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
+        <form action="/customers/import" method="POST" enctype="multipart/form-data" class="import-form">
+            <input type="file" id="customerImportInput" name="importFile" accept=".xlsx" style="display:none;">
+            <label for="customerImportInput" class="btn btn-secondary" title="Import customers from .xlsx"><i class="bi bi-upload"></i> Import .xlsx</label>
+        </form>
         <a href="/customers/new" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add Customer</a>
     </div>
 </div>
@@ -198,6 +202,15 @@ if (toast) {
     }, 5000);
 }
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
+
+var customerImportInput = document.getElementById('customerImportInput');
+if (customerImportInput) {
+    customerImportInput.addEventListener('change', function() {
+        if (this.files && this.files.length) {
+            this.form.submit();
+        }
+    });
+}
 
 var customerBulkBar = document.getElementById('customerBulkBar');
 var customerBulkHint = document.getElementById('customerBulkHint');

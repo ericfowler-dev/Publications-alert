@@ -625,6 +625,197 @@ app.get('/customers/export', async (req, res) => {
   }
 });
 
+app.post('/customers/import', upload.single('importFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.redirect('/customers?error=' + encodeURIComponent('No import file selected'));
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(req.file.path);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      fs.unlinkSync(req.file.path);
+      return res.redirect('/customers?error=' + encodeURIComponent('Import file is empty'));
+    }
+
+    const headerMap = {};
+    const headerAliases = {
+      'customer id': 'customer_id',
+      'contact name': 'contact_name',
+      'company': 'company',
+      'email': 'email',
+      'cc emails': 'cc_emails',
+      'cc email': 'cc_emails',
+      'type': 'customer_type',
+      'customer type': 'customer_type',
+      'subscription tier': 'subscription_tier',
+      'status': 'status',
+      'products': 'products',
+      'markets': 'markets',
+      'content types': 'content_types',
+      'content type': 'content_types',
+      'regions': 'regions'
+    };
+
+    const headerRow = sheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      const text = String(cell.text || cell.value || '').trim().toLowerCase();
+      if (!text) return;
+      const key = headerAliases[text] || text;
+      headerMap[key] = colNumber;
+    });
+
+    const getCell = (row, key) => {
+      const col = headerMap[key];
+      if (!col) return '';
+      const cell = row.getCell(col);
+      return String(cell.text || cell.value || '').trim();
+    };
+
+    const normalizeList = (value) => {
+      if (!value) return '';
+      const parts = String(value)
+        .split(/[;,]+/)
+        .map(v => v.trim())
+        .filter(Boolean);
+      return parts.join('; ');
+    };
+
+    const normalizeStatus = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      if (!raw) return 'Active';
+      if (raw.startsWith('inact')) return 'Inactive';
+      if (raw.startsWith('susp')) return 'Suspended';
+      return 'Active';
+    };
+
+    const normalizeCustomerType = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      if (!raw) return 'End User';
+      if (raw === 'internal') return 'Internal';
+      if (raw === 'oem') return 'OEM';
+      if (raw === 'dealer') return 'Dealer';
+      if (raw === 'distributor') return 'Distributor';
+      if (raw === 'end user' || raw === 'enduser') return 'End User';
+      return value.trim();
+    };
+
+    const normalizeTier = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      if (!raw) return 'All Announcements';
+      if (raw.startsWith('essential')) return 'Essential';
+      if (raw.startsWith('standard')) return 'Standard';
+      if (raw.includes('all')) return 'All Announcements';
+      if (raw.includes('comprehensive')) return 'All Announcements';
+      return value.trim();
+    };
+
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    await dbRun('BEGIN TRANSACTION');
+    for (let i = 2; i <= sheet.rowCount; i += 1) {
+      const row = sheet.getRow(i);
+      if (!row || row.actualCellCount === 0) continue;
+
+      const contact_name = getCell(row, 'contact_name');
+      const company = getCell(row, 'company');
+      const email = getCell(row, 'email');
+      const rawCustomerId = getCell(row, 'customer_id');
+      const customer_type = normalizeCustomerType(getCell(row, 'customer_type'));
+      const isInternal = customer_type.toLowerCase() === 'internal';
+      const customer_id = isInternal ? '' : (rawCustomerId && rawCustomerId.toLowerCase() === 'internal employee' ? '' : rawCustomerId);
+
+      if (!contact_name || !company || !email) {
+        skipped += 1;
+        console.warn(`Import row ${i} skipped: missing contact name, company, or email`);
+        continue;
+      }
+      if (!isInternal && !customer_id) {
+        skipped += 1;
+        console.warn(`Import row ${i} skipped: customer ID required for non-internal customers`);
+        continue;
+      }
+
+      const cc_emails = getCell(row, 'cc_emails');
+      const subscription_tier = normalizeTier(getCell(row, 'subscription_tier'));
+      const status = normalizeStatus(getCell(row, 'status'));
+      const products = normalizeList(getCell(row, 'products'));
+      const markets = normalizeList(getCell(row, 'markets'));
+      const content_types = normalizeList(getCell(row, 'content_types'));
+      const regions = normalizeList(getCell(row, 'regions'));
+
+      let existing = null;
+      if (customer_id && !isInternal) {
+        existing = await dbGet('SELECT * FROM customers WHERE customer_id = ?', [customer_id]);
+      }
+      if (!existing) {
+        existing = await dbGet('SELECT * FROM customers WHERE email = ? AND company = ?', [email, company]);
+      }
+
+      if (existing) {
+        await dbRun(
+          `UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, status=? WHERE id=?`,
+          [
+            contact_name || existing.contact_name,
+            company || existing.company,
+            isInternal ? '' : (customer_id || existing.customer_id),
+            email || existing.email,
+            cc_emails || existing.cc_emails || '',
+            products || existing.products || '',
+            markets || existing.markets || '',
+            content_types || existing.content_types || '',
+            regions || existing.regions || '',
+            customer_type || existing.customer_type,
+            subscription_tier || existing.subscription_tier,
+            status || existing.status,
+            existing.id
+          ]
+        );
+        updated += 1;
+      } else {
+        await dbRun(
+          `INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            contact_name,
+            company,
+            isInternal ? '' : customer_id,
+            email,
+            cc_emails || '',
+            products || '',
+            markets || '',
+            content_types || '',
+            regions || '',
+            customer_type,
+            subscription_tier,
+            status
+          ]
+        );
+        inserted += 1;
+      }
+    }
+    await dbRun('COMMIT');
+
+    fs.unlinkSync(req.file.path);
+    const message = `Import complete: ${inserted} added, ${updated} updated, ${skipped} skipped.`;
+    res.redirect('/customers?success=' + encodeURIComponent(message));
+  } catch (err) {
+    try {
+      await dbRun('ROLLBACK');
+    } catch (rollbackErr) {
+      console.error('Import rollback error:', rollbackErr);
+    }
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.error('Customer import error:', err);
+    res.redirect('/customers?error=' + encodeURIComponent('Customer import failed'));
+  }
+});
+
 app.get('/customers/new', async (req, res) => {
   try {
     const metadata = await getMetadata();

@@ -613,6 +613,10 @@ tbody td input[type="checkbox"] { cursor: pointer; }
   background: var(--primary-50);
   color: var(--primary);
 }
+.import-form {
+  display: inline-flex;
+  align-items: center;
+}
 .refresh-controls {
   display: flex;
   align-items: center;
