@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const SQLiteStore = require('connect-sqlite3')(session);
 const sqlite3 = require('sqlite3').verbose();
 const multer = require('multer');
 const nodemailer = require('nodemailer');
@@ -11,13 +12,27 @@ const ExcelJS = require('exceljs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const DATA_DIR = process.env.DATA_DIR || (IS_PRODUCTION ? '/data' : __dirname);
 const LOG_ARCHIVE_DAYS = parseInt(process.env.LOG_ARCHIVE_DAYS || '180', 10) || 180;
 const LOG_ARCHIVE_ENABLED = String(process.env.LOG_ARCHIVE_ENABLED || 'true').toLowerCase() !== 'false';
 const LOG_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const EXPORT_DIR = path.join(__dirname, 'exports');
+const EXPORT_DIR = process.env.EXPORT_DIR || (IS_PRODUCTION ? path.join(DATA_DIR, 'exports') : path.join(__dirname, 'exports'));
+const UPLOAD_DIR = process.env.UPLOAD_DIR || (IS_PRODUCTION ? path.join(DATA_DIR, 'uploads') : path.join(__dirname, 'uploads'));
+const DB_PATH = process.env.DB_PATH || (IS_PRODUCTION ? path.join(DATA_DIR, 'publications.db') : path.join(__dirname, 'publications.db'));
+const EMAIL_SEND_CONCURRENCY = Math.max(1, Math.min(parseInt(process.env.EMAIL_SEND_CONCURRENCY || '3', 10) || 3, 10));
+const EMAIL_SEND_BATCH_DELAY_MS = Math.max(0, parseInt(process.env.EMAIL_SEND_BATCH_DELAY_MS || '250', 10) || 0);
+const MAX_UPLOAD_SIZE_MB = Math.max(1, parseInt(process.env.MAX_UPLOAD_SIZE_MB || '25', 10) || 25);
+const activeDistributionJobs = new Set();
+
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
 
 // Database setup - persistent disk on Render, local in development
-const DB_PATH = process.env.NODE_ENV === 'production' ? '/data/publications.db' : './publications.db';
+ensureDir(path.dirname(DB_PATH));
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
     console.error('Error opening database:', err.message);
@@ -89,6 +104,31 @@ function initDatabase() {
       archived_at DATETIME
     )`);
 
+    db.run(`CREATE TABLE IF NOT EXISTS distribution_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      publication_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'Queued',
+      total_recipients INTEGER DEFAULT 0,
+      sent_count INTEGER DEFAULT 0,
+      failed_count INTEGER DEFAULT 0,
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      completed_at DATETIME
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS distribution_job_recipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL,
+      customer_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'Pending',
+      attempts INTEGER DEFAULT 0,
+      last_error TEXT,
+      sent_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(job_id, customer_id)
+    )`);
+
     db.run(`CREATE TABLE IF NOT EXISTS metadata (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       category TEXT NOT NULL,
@@ -99,11 +139,9 @@ function initDatabase() {
     )`);
 
     function addColumnIfMissing(table, column, definition) {
-      db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-        if (err) return;
-        const hasColumn = (rows || []).some(row => row.name === column);
-        if (!hasColumn) {
-          db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`, (err) => {
+        if (err && !String(err.message || '').includes('duplicate column name')) {
+          console.error(`Migration error adding ${table}.${column}:`, err.message);
         }
       });
     }
@@ -112,6 +150,15 @@ function initDatabase() {
     addColumnIfMissing('publications', 'archived_at', 'DATETIME');
     addColumnIfMissing('distribution_logs', 'is_archived', 'INTEGER DEFAULT 0');
     addColumnIfMissing('distribution_logs', 'archived_at', 'DATETIME');
+
+    db.run('CREATE INDEX IF NOT EXISTS idx_customers_email_nocase ON customers(email COLLATE NOCASE)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_customers_customer_id_nocase ON customers(customer_id COLLATE NOCASE)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_publications_status_archived ON publications(distribution_status, is_archived)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_distribution_logs_archive_date ON distribution_logs(is_archived, sent_date)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_distribution_logs_publication ON distribution_logs(publication_number)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_distribution_jobs_status ON distribution_jobs(status)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_distribution_job_recipients_job_status ON distribution_job_recipients(job_id, status)');
 
     // Migrate old "Comprehensive" tier to "All Announcements"
     db.run("UPDATE customers SET subscription_tier = 'All Announcements' WHERE subscription_tier = 'Comprehensive'");
@@ -161,7 +208,10 @@ function initDatabase() {
       }
     });
   });
-  scheduleLogArchive();
+  setTimeout(() => {
+    scheduleLogArchive();
+    resumeDistributionJobs();
+  }, 1000);
 }
 
 // Helper: fetch active metadata grouped by category
@@ -179,12 +229,6 @@ function getMetadata() {
       resolve(grouped);
     });
   });
-}
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
 }
 
 // Helper: promisified db queries
@@ -218,6 +262,87 @@ function clampNumber(value, min, max, fallback) {
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function normalizeDelimitedEmails(value) {
+  return String(value || '')
+    .split(/[;,]/)
+    .map(normalizeEmail)
+    .filter(Boolean)
+    .filter((email, index, all) => all.indexOf(email) === index)
+    .join(', ');
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+}
+
+async function findCustomerByNormalizedEmail(email, excludeId) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  const params = [normalized];
+  let sql = 'SELECT * FROM customers WHERE lower(trim(email)) = ?';
+  if (excludeId) {
+    sql += ' AND id != ?';
+    params.push(excludeId);
+  }
+  sql += ' ORDER BY id ASC LIMIT 1';
+  return dbGet(sql, params);
+}
+
+async function findCustomerByNormalizedCustomerId(customerId, excludeId) {
+  const normalized = normalizeText(customerId).toLowerCase();
+  if (!normalized) return null;
+  const params = [normalized];
+  let sql = 'SELECT * FROM customers WHERE lower(trim(customer_id)) = ?';
+  if (excludeId) {
+    sql += ' AND id != ?';
+    params.push(excludeId);
+  }
+  sql += ' ORDER BY id ASC LIMIT 1';
+  return dbGet(sql, params);
+}
+
+function customerConflictMessage(type, customer) {
+  const label = customer ? `${customer.contact_name} (${customer.company}, ${customer.email})` : 'another customer';
+  return `${type} already exists for ${label}. Open the existing profile instead of creating a duplicate.`;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function generateSelfCustomerId() {
+  return `SELF-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+}
+
+function splitStoredList(value) {
+  return String(value || '')
+    .split(/[;,]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+function normalizeMatchValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function hasAnyMatch(leftValues, rightValues) {
+  const rightSet = new Set(rightValues.map(normalizeMatchValue));
+  return leftValues.some(value => rightSet.has(normalizeMatchValue(value)));
+}
+
+function includesMatchValue(values, target) {
+  const normalizedTarget = normalizeMatchValue(target);
+  return values.some(value => normalizeMatchValue(value) === normalizedTarget);
 }
 
 function buildPublicationFilters(filters) {
@@ -333,13 +458,18 @@ app.set('views', path.join(__dirname, 'views'));
 // Trust proxy (Render, Heroku, etc.) so secure cookies work behind HTTPS reverse proxy
 app.set('trust proxy', 1);
 
+if (IS_PRODUCTION && !process.env.SESSION_SECRET) {
+  console.warn('WARNING: SESSION_SECRET is not set. Sessions will be invalidated on restart.');
+}
+
 // Session setup
 app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+  store: IS_PRODUCTION ? new SQLiteStore({ db: 'sessions.db', dir: DATA_DIR }) : undefined,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: IS_PRODUCTION,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
@@ -428,7 +558,6 @@ app.use((req, res, next) => {
 });
 
 // File upload setup - persistent disk on Render, local in development
-const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/data/uploads' : 'uploads';
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     if (!fs.existsSync(UPLOAD_DIR)) {
@@ -440,7 +569,10 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + file.originalname);
   }
 });
-const upload = multer({ storage: storage });
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: MAX_UPLOAD_SIZE_MB * 1024 * 1024 }
+});
 
 // Email transporter - configured from environment variables
 let transporter = null;
@@ -496,7 +628,8 @@ app.get('/', async (req, res) => {
 
 app.get('/customers', async (req, res) => {
   try {
-    const { search, status, tier, sort, dir } = req.query;
+    const { search, status, tier, sort, dir, duplicates } = req.query;
+    const showDuplicates = parseBoolean(duplicates);
     const customerSortColumns = {
       contact_name: 'contact_name',
       company: 'company',
@@ -526,6 +659,15 @@ app.get('/customers', async (req, res) => {
       sql += ' AND subscription_tier = ?';
       params.push(tier);
     }
+    if (showDuplicates) {
+      sql += ` AND lower(trim(email)) IN (
+        SELECT lower(trim(email))
+        FROM customers
+        WHERE email IS NOT NULL AND trim(email) <> ''
+        GROUP BY lower(trim(email))
+        HAVING COUNT(*) > 1
+      )`;
+    }
     sql += ` ORDER BY ${customerSortColumns[sortBy]} ${sortDir.toUpperCase()}, contact_name ASC`;
 
     const customers = await dbAll(sql, params);
@@ -534,6 +676,7 @@ app.get('/customers', async (req, res) => {
       search: search || '',
       statusFilter: status || '',
       tierFilter: tier || '',
+      duplicatesFilter: showDuplicates ? '1' : '',
       sortBy,
       sortDir,
       success: req.query.success || '',
@@ -785,6 +928,10 @@ function normalizeFrequency(value) {
   return value.trim();
 }
 
+function hasImportValue(value) {
+  return String(value || '').trim() !== '';
+}
+
 async function loadCustomerImportSheet(filePath, originalName) {
   const ext = path.extname(originalName || filePath || '').toLowerCase();
   const workbook = new ExcelJS.Workbook();
@@ -832,12 +979,17 @@ async function buildCustomerImportPreview(filePath, originalName) {
 
     const contact_name = getCellValue(row, headerMap, 'contact_name');
     const company = getCellValue(row, headerMap, 'company');
-    const email = getCellValue(row, headerMap, 'email');
+    const email = normalizeEmail(getCellValue(row, headerMap, 'email'));
     const rawCustomerId = getCellValue(row, headerMap, 'customer_id');
+    const rawCcEmails = getCellValue(row, headerMap, 'cc_emails');
     const rawCustomerType = getCellValue(row, headerMap, 'customer_type');
     const rawTier = getCellValue(row, headerMap, 'subscription_tier');
     const rawStatus = getCellValue(row, headerMap, 'status');
     const rawFrequency = getCellValue(row, headerMap, 'preferred_frequency');
+    const rawProducts = getCellValue(row, headerMap, 'products');
+    const rawMarkets = getCellValue(row, headerMap, 'markets');
+    const rawContentTypes = getCellValue(row, headerMap, 'content_types');
+    const rawRegions = getCellValue(row, headerMap, 'regions');
 
     const customer_type = normalizeCustomerType(rawCustomerType);
     const isInternal = customer_type.toLowerCase() === 'internal';
@@ -846,19 +998,19 @@ async function buildCustomerImportPreview(filePath, originalName) {
     const status = normalizeStatus(rawStatus);
     const preferred_frequency = normalizeFrequency(rawFrequency);
 
-    const productsResult = normalizeList(getCellValue(row, headerMap, 'products'), {
+    const productsResult = normalizeList(rawProducts, {
       allowedMap: allowedProducts,
       allValue: 'All Products'
     });
-    const marketsResult = normalizeList(getCellValue(row, headerMap, 'markets'), {
+    const marketsResult = normalizeList(rawMarkets, {
       allowedMap: allowedMarkets,
       allValue: 'All Markets'
     });
-    const contentTypesResult = normalizeList(getCellValue(row, headerMap, 'content_types'), {
+    const contentTypesResult = normalizeList(rawContentTypes, {
       allowedMap: allowedContentTypes,
       allValue: 'All Content Types'
     });
-    const regionsResult = normalizeList(getCellValue(row, headerMap, 'regions'), {
+    const regionsResult = normalizeList(rawRegions, {
       allowedMap: allowedRegions,
       allValue: 'Global'
     });
@@ -869,7 +1021,7 @@ async function buildCustomerImportPreview(filePath, originalName) {
     if (!company) errors.push('Missing company');
     if (!email) errors.push('Missing email');
     if (!isInternal && !customer_id) errors.push('Customer ID required for non-internal customers');
-    if (email && !/.+@.+\..+/.test(email)) warnings.push('Email format looks invalid');
+    if (email && !isValidEmail(email)) warnings.push('Email format looks invalid');
 
     if (rawCustomerType && customer_type !== rawCustomerType.trim()) {
       warnings.push(`Customer Type normalized to "${customer_type}"`);
@@ -908,7 +1060,7 @@ async function buildCustomerImportPreview(filePath, originalName) {
         company,
         customer_id,
         email,
-        cc_emails: getCellValue(row, headerMap, 'cc_emails'),
+        cc_emails: rawCcEmails,
         customer_type,
         subscription_tier,
         preferred_frequency,
@@ -918,6 +1070,21 @@ async function buildCustomerImportPreview(filePath, originalName) {
         content_types: contentTypesResult.value,
         regions: regionsResult.value
       },
+      provided: {
+        contact_name: hasImportValue(contact_name),
+        company: hasImportValue(company),
+        customer_id: hasImportValue(rawCustomerId),
+        email: hasImportValue(email),
+        cc_emails: hasImportValue(rawCcEmails),
+        customer_type: hasImportValue(rawCustomerType),
+        subscription_tier: hasImportValue(rawTier),
+        preferred_frequency: hasImportValue(rawFrequency),
+        status: hasImportValue(rawStatus),
+        products: hasImportValue(rawProducts),
+        markets: hasImportValue(rawMarkets),
+        content_types: hasImportValue(rawContentTypes),
+        regions: hasImportValue(rawRegions)
+      },
       errors,
       warnings,
       action: 'skip'
@@ -926,12 +1093,10 @@ async function buildCustomerImportPreview(filePath, originalName) {
 
   const existingCustomers = await dbAll('SELECT id, customer_id, email, company FROM customers');
   const byCustomerId = new Map();
-  const byEmailCompany = new Map();
+  const byEmail = new Map();
   existingCustomers.forEach(c => {
     if (c.customer_id) byCustomerId.set(String(c.customer_id).toLowerCase(), c);
-    if (c.email && c.company) {
-      byEmailCompany.set(`${String(c.email).toLowerCase()}|${String(c.company).toLowerCase()}`, c);
-    }
+    if (c.email) byEmail.set(normalizeEmail(c.email), c);
   });
 
   rows.forEach(row => {
@@ -943,7 +1108,7 @@ async function buildCustomerImportPreview(filePath, originalName) {
     let existing = null;
     if (customerIdKey) existing = byCustomerId.get(customerIdKey);
     if (!existing) {
-      existing = byEmailCompany.get(`${row.data.email.toLowerCase()}|${row.data.company.toLowerCase()}`);
+      existing = byEmail.get(normalizeEmail(row.data.email));
     }
     row.action = existing ? 'update' : 'insert';
   });
@@ -1104,10 +1269,11 @@ app.post('/customers/import/confirm', async (req, res) => {
         continue;
       }
       const data = row.data || {};
+      const provided = row.provided || {};
       const contact_name = data.contact_name;
       const company = data.company;
-      const email = data.email;
-      const cc_emails = data.cc_emails || '';
+      const email = normalizeEmail(data.email);
+      const cc_emails = normalizeDelimitedEmails(data.cc_emails);
       const customer_type = normalizeCustomerType(data.customer_type);
       const isInternal = customer_type.toLowerCase() === 'internal';
       const customer_id = isInternal ? '' : (data.customer_id || '');
@@ -1121,29 +1287,29 @@ app.post('/customers/import/confirm', async (req, res) => {
 
       let existing = null;
       if (customer_id && !isInternal) {
-        existing = await dbGet('SELECT * FROM customers WHERE customer_id = ?', [customer_id]);
+        existing = await findCustomerByNormalizedCustomerId(customer_id);
       }
       if (!existing) {
-        existing = await dbGet('SELECT * FROM customers WHERE email = ? AND company = ?', [email, company]);
+        existing = await findCustomerByNormalizedEmail(email);
       }
 
       if (existing) {
         await dbRun(
           `UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, preferred_frequency=?, status=? WHERE id=?`,
           [
-            contact_name || existing.contact_name,
-            company || existing.company,
-            isInternal ? '' : (customer_id || existing.customer_id),
-            email || existing.email,
-            cc_emails || existing.cc_emails || '',
-            products || existing.products || '',
-            markets || existing.markets || '',
-            content_types || existing.content_types || '',
-            regions || existing.regions || '',
-            customer_type || existing.customer_type,
-            subscription_tier || existing.subscription_tier,
-            preferred_frequency || existing.preferred_frequency,
-            status || existing.status,
+            provided.contact_name ? contact_name : existing.contact_name,
+            provided.company ? company : existing.company,
+            provided.customer_type && isInternal ? '' : (provided.customer_id ? customer_id : existing.customer_id),
+            provided.email ? email : existing.email,
+            provided.cc_emails ? cc_emails : (existing.cc_emails || ''),
+            provided.products ? products : (existing.products || ''),
+            provided.markets ? markets : (existing.markets || ''),
+            provided.content_types ? content_types : (existing.content_types || ''),
+            provided.regions ? regions : (existing.regions || ''),
+            provided.customer_type ? customer_type : existing.customer_type,
+            provided.subscription_tier ? subscription_tier : existing.subscription_tier,
+            provided.preferred_frequency ? preferred_frequency : existing.preferred_frequency,
+            provided.status ? status : existing.status,
             existing.id
           ]
         );
@@ -1207,30 +1373,44 @@ app.get('/customers/new', async (req, res) => {
   }
 });
 
-app.post('/customers', (req, res) => {
-  const { contact_name, company, customer_id, email, cc_emails, customer_type, subscription_tier, preferred_frequency, status } = req.body;
-  const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
-  const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
-  const normalizedCustomerId = isInternalEmployee ? '' : String(customer_id || '').trim();
-  if (!isInternalEmployee && !normalizedCustomerId) {
-    return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
-  }
+app.post('/customers', async (req, res) => {
+  try {
+    const { contact_name, company, customer_id, email, cc_emails, customer_type, subscription_tier, preferred_frequency, status } = req.body;
+    const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
+    const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
+    const normalizedCustomerId = isInternalEmployee ? '' : normalizeText(customer_id);
+    const normalizedEmail = normalizeEmail(email);
+    if (!isInternalEmployee && !normalizedCustomerId) {
+      return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
+    }
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      return res.redirect('/customers?error=' + encodeURIComponent('A valid email is required'));
+    }
 
-  const products = Array.isArray(req.body.products) ? req.body.products.join('; ') : req.body.products || '';
-  const markets = Array.isArray(req.body.markets) ? req.body.markets.join('; ') : req.body.markets || '';
-  const content_types = Array.isArray(req.body.content_types) ? req.body.content_types.join('; ') : req.body.content_types || '';
-  const regions = Array.isArray(req.body.regions) ? req.body.regions.join('; ') : req.body.regions || '';
-
-  db.run(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, preferred_frequency, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [contact_name, company, normalizedCustomerId, email, cc_emails, products, markets, content_types, regions, normalizedCustomerType, subscription_tier, preferred_frequency, status],
-    function(err) {
-      if (err) {
-        console.error('Create customer error:', err);
-        return res.redirect('/customers?error=' + encodeURIComponent('Error creating customer'));
+    const emailConflict = await findCustomerByNormalizedEmail(normalizedEmail);
+    if (emailConflict) {
+      return res.redirect('/customers?error=' + encodeURIComponent(customerConflictMessage('Email', emailConflict)));
+    }
+    if (normalizedCustomerId) {
+      const customerIdConflict = await findCustomerByNormalizedCustomerId(normalizedCustomerId);
+      if (customerIdConflict) {
+        return res.redirect('/customers?error=' + encodeURIComponent(customerConflictMessage('Customer ID', customerIdConflict)));
       }
-      res.redirect('/customers?success=' + encodeURIComponent('Customer created successfully'));
-    });
+    }
+
+    const products = Array.isArray(req.body.products) ? req.body.products.join('; ') : req.body.products || '';
+    const markets = Array.isArray(req.body.markets) ? req.body.markets.join('; ') : req.body.markets || '';
+    const content_types = Array.isArray(req.body.content_types) ? req.body.content_types.join('; ') : req.body.content_types || '';
+    const regions = Array.isArray(req.body.regions) ? req.body.regions.join('; ') : req.body.regions || '';
+
+    await dbRun(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, preferred_frequency, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [normalizeText(contact_name), normalizeText(company), normalizedCustomerId, normalizedEmail, normalizeDelimitedEmails(cc_emails), products, markets, content_types, regions, normalizedCustomerType, subscription_tier, preferred_frequency, status]);
+    res.redirect('/customers?success=' + encodeURIComponent('Customer created successfully'));
+  } catch (err) {
+    console.error('Create customer error:', err);
+    res.redirect('/customers?error=' + encodeURIComponent('Error creating customer'));
+  }
 });
 
 app.post('/customers/delete-bulk', express.json(), async (req, res) => {
@@ -1269,30 +1449,44 @@ app.get('/customers/:id/edit', async (req, res) => {
   }
 });
 
-app.post('/customers/:id', (req, res) => {
-  const id = req.params.id;
-  const { contact_name, company, customer_id, email, cc_emails, customer_type, subscription_tier, preferred_frequency, status } = req.body;
-  const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
-  const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
-  const normalizedCustomerId = isInternalEmployee ? '' : String(customer_id || '').trim();
-  if (!isInternalEmployee && !normalizedCustomerId) {
-    return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
-  }
+app.post('/customers/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { contact_name, company, customer_id, email, cc_emails, customer_type, subscription_tier, preferred_frequency, status } = req.body;
+    const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
+    const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
+    const normalizedCustomerId = isInternalEmployee ? '' : normalizeText(customer_id);
+    const normalizedEmail = normalizeEmail(email);
+    if (!isInternalEmployee && !normalizedCustomerId) {
+      return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
+    }
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      return res.redirect('/customers?error=' + encodeURIComponent('A valid email is required'));
+    }
 
-  const products = Array.isArray(req.body.products) ? req.body.products.join('; ') : req.body.products || '';
-  const markets = Array.isArray(req.body.markets) ? req.body.markets.join('; ') : req.body.markets || '';
-  const content_types = Array.isArray(req.body.content_types) ? req.body.content_types.join('; ') : req.body.content_types || '';
-  const regions = Array.isArray(req.body.regions) ? req.body.regions.join('; ') : req.body.regions || '';
-
-  db.run(`UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, preferred_frequency=?, status=? WHERE id=?`,
-    [contact_name, company, normalizedCustomerId, email, cc_emails, products, markets, content_types, regions, normalizedCustomerType, subscription_tier, preferred_frequency, status, id],
-    function(err) {
-      if (err) {
-        console.error('Update customer error:', err);
-        return res.redirect('/customers?error=' + encodeURIComponent('Error updating customer'));
+    const emailConflict = await findCustomerByNormalizedEmail(normalizedEmail, id);
+    if (emailConflict) {
+      return res.redirect('/customers?error=' + encodeURIComponent(customerConflictMessage('Email', emailConflict)));
+    }
+    if (normalizedCustomerId) {
+      const customerIdConflict = await findCustomerByNormalizedCustomerId(normalizedCustomerId, id);
+      if (customerIdConflict) {
+        return res.redirect('/customers?error=' + encodeURIComponent(customerConflictMessage('Customer ID', customerIdConflict)));
       }
-      res.redirect('/customers?success=' + encodeURIComponent('Customer updated successfully'));
-    });
+    }
+
+    const products = Array.isArray(req.body.products) ? req.body.products.join('; ') : req.body.products || '';
+    const markets = Array.isArray(req.body.markets) ? req.body.markets.join('; ') : req.body.markets || '';
+    const content_types = Array.isArray(req.body.content_types) ? req.body.content_types.join('; ') : req.body.content_types || '';
+    const regions = Array.isArray(req.body.regions) ? req.body.regions.join('; ') : req.body.regions || '';
+
+    await dbRun(`UPDATE customers SET contact_name=?, company=?, customer_id=?, email=?, cc_emails=?, products=?, markets=?, content_types=?, regions=?, customer_type=?, subscription_tier=?, preferred_frequency=?, status=? WHERE id=?`,
+      [normalizeText(contact_name), normalizeText(company), normalizedCustomerId, normalizedEmail, normalizeDelimitedEmails(cc_emails), products, markets, content_types, regions, normalizedCustomerType, subscription_tier, preferred_frequency, status, id]);
+    res.redirect('/customers?success=' + encodeURIComponent('Customer updated successfully'));
+  } catch (err) {
+    console.error('Update customer error:', err);
+    res.redirect('/customers?error=' + encodeURIComponent('Error updating customer'));
+  }
 });
 
 app.post('/customers/:id/delete', (req, res) => {
@@ -1600,28 +1794,203 @@ app.post('/publications/:id/distribute', express.json(), async (req, res) => {
     if (!Array.isArray(customerIds) || customerIds.length === 0) {
       return res.status(400).json({ error: 'No customers selected' });
     }
+    const normalizedCustomerIds = [...new Set(customerIds.map(custId => parseInt(custId, 10)).filter(Number.isInteger))];
+    if (!normalizedCustomerIds.length) {
+      return res.status(400).json({ error: 'No valid customers selected' });
+    }
 
     const pub = await dbGet('SELECT * FROM publications WHERE id = ?', [id]);
     if (!pub) return res.status(404).json({ error: 'Publication not found' });
 
-    let recipientsCount = 0;
-    for (const custId of customerIds) {
-      const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [custId]);
-      if (!customer) continue;
-      sendEmail(pub, customer);
-      logDistribution(pub, customer);
-      recipientsCount++;
-    }
+    const jobId = await createDistributionJob(pub.id, normalizedCustomerIds);
+    processDistributionJob(jobId);
 
-    await dbRun('UPDATE publications SET distribution_status = ?, date_published = datetime("now"), recipients_count = ? WHERE id = ?',
-      ['Distributed', recipientsCount, id]);
-
-    res.json({ success: true, count: recipientsCount });
+    res.json({ success: true, queued: true, jobId, count: normalizedCustomerIds.length });
   } catch (err) {
     console.error('Distribution error:', err);
     res.status(500).json({ error: 'Distribution failed' });
   }
 });
+
+async function createDistributionJob(publicationId, customerIds) {
+  const uniqueCustomerIds = [];
+  const seenEmails = new Set();
+  for (const customerId of customerIds) {
+    const customer = await dbGet("SELECT id, email FROM customers WHERE id = ? AND status = 'Active'", [customerId]);
+    if (!customer) continue;
+    const emailKey = normalizeEmail(customer.email);
+    if (!emailKey || seenEmails.has(emailKey)) continue;
+    seenEmails.add(emailKey);
+    uniqueCustomerIds.push(customer.id);
+  }
+  if (!uniqueCustomerIds.length) {
+    throw new Error('No active, unique-email customers selected');
+  }
+
+  await dbRun('BEGIN TRANSACTION');
+  try {
+    const job = await dbRun(
+      'INSERT INTO distribution_jobs (publication_id, status, total_recipients) VALUES (?, ?, ?)',
+      [publicationId, 'Queued', uniqueCustomerIds.length]
+    );
+    for (const customerId of uniqueCustomerIds) {
+      await dbRun(
+        'INSERT OR IGNORE INTO distribution_job_recipients (job_id, customer_id, status) VALUES (?, ?, ?)',
+        [job.lastID, customerId, 'Pending']
+      );
+    }
+    await dbRun(
+      'UPDATE publications SET distribution_status = ?, recipients_count = ? WHERE id = ?',
+      ['Queued', uniqueCustomerIds.length, publicationId]
+    );
+    await dbRun('COMMIT');
+    return job.lastID;
+  } catch (err) {
+    await dbRun('ROLLBACK');
+    throw err;
+  }
+}
+
+async function getDistributionJobCounts(jobId) {
+  const row = await dbGet(
+    `SELECT
+       COUNT(*) as total,
+       SUM(CASE WHEN status = 'Sent' THEN 1 ELSE 0 END) as sent,
+       SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed
+     FROM distribution_job_recipients
+     WHERE job_id = ?`,
+    [jobId]
+  );
+  return {
+    total: row ? row.total || 0 : 0,
+    sent: row ? row.sent || 0 : 0,
+    failed: row ? row.failed || 0 : 0
+  };
+}
+
+async function updateDistributionJobCounts(jobId) {
+  const counts = await getDistributionJobCounts(jobId);
+  await dbRun(
+    'UPDATE distribution_jobs SET sent_count = ?, failed_count = ?, total_recipients = ? WHERE id = ?',
+    [counts.sent, counts.failed, counts.total, jobId]
+  );
+  return counts;
+}
+
+async function processDistributionJob(jobId) {
+  if (activeDistributionJobs.has(jobId)) return;
+  activeDistributionJobs.add(jobId);
+  try {
+    const job = await dbGet('SELECT * FROM distribution_jobs WHERE id = ?', [jobId]);
+    if (!job) return;
+
+    const pub = await dbGet('SELECT * FROM publications WHERE id = ?', [job.publication_id]);
+    if (!pub) throw new Error('Publication not found for distribution job');
+
+    await dbRun(
+      `UPDATE distribution_jobs
+       SET status = 'Sending', started_at = COALESCE(started_at, datetime('now')), error = NULL
+       WHERE id = ?`,
+      [jobId]
+    );
+    await dbRun(
+      'UPDATE publications SET distribution_status = ?, recipients_count = ? WHERE id = ?',
+      ['Sending', job.total_recipients || 0, pub.id]
+    );
+
+    while (true) {
+      const recipients = await dbAll(
+        `SELECT * FROM distribution_job_recipients
+         WHERE job_id = ? AND status = 'Pending'
+         ORDER BY id ASC
+         LIMIT ?`,
+        [jobId, EMAIL_SEND_CONCURRENCY]
+      );
+      if (!recipients.length) break;
+
+      await Promise.all(recipients.map(recipient => sendDistributionRecipient(pub, recipient)));
+      const counts = await updateDistributionJobCounts(jobId);
+      await dbRun('UPDATE publications SET recipients_count = ? WHERE id = ?', [counts.sent, pub.id]);
+      if (EMAIL_SEND_BATCH_DELAY_MS > 0) await sleep(EMAIL_SEND_BATCH_DELAY_MS);
+    }
+
+    const counts = await updateDistributionJobCounts(jobId);
+    const finalPublicationStatus = counts.sent > 0 ? 'Distributed' : 'Failed';
+    await dbRun(
+      `UPDATE distribution_jobs
+       SET status = 'Completed', completed_at = datetime('now'), sent_count = ?, failed_count = ?
+       WHERE id = ?`,
+      [counts.sent, counts.failed, jobId]
+    );
+    await dbRun(
+      'UPDATE publications SET distribution_status = ?, date_published = datetime("now"), recipients_count = ? WHERE id = ?',
+      [finalPublicationStatus, counts.sent, pub.id]
+    );
+  } catch (err) {
+    console.error('Distribution job error:', err);
+    await dbRun(
+      `UPDATE distribution_jobs
+       SET status = 'Failed', completed_at = datetime('now'), error = ?
+       WHERE id = ?`,
+      [err.message || String(err), jobId]
+    );
+  } finally {
+    activeDistributionJobs.delete(jobId);
+  }
+}
+
+async function sendDistributionRecipient(publication, jobRecipient) {
+  await dbRun(
+    `UPDATE distribution_job_recipients
+     SET status = 'Sending', attempts = attempts + 1, last_error = NULL
+     WHERE id = ?`,
+    [jobRecipient.id]
+  );
+
+  const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [jobRecipient.customer_id]);
+  if (!customer) {
+    await dbRun(
+      `UPDATE distribution_job_recipients
+       SET status = 'Failed', last_error = ?
+       WHERE id = ?`,
+      ['Customer no longer exists', jobRecipient.id]
+    );
+    return;
+  }
+
+  try {
+    const result = await sendEmail(publication, customer);
+    await logDistribution(publication, customer, 'Sent', `Products: ${customer.products}, Markets: ${customer.markets}`);
+    await dbRun(
+      `UPDATE distribution_job_recipients
+       SET status = 'Sent', sent_at = datetime('now'), last_error = ?
+       WHERE id = ?`,
+      [result.response || null, jobRecipient.id]
+    );
+    await dbRun('UPDATE customers SET last_notified = datetime("now") WHERE id = ?', [customer.id]);
+  } catch (err) {
+    const message = err.message || String(err);
+    await logDistribution(publication, customer, 'Failed', message);
+    await dbRun(
+      `UPDATE distribution_job_recipients
+       SET status = 'Failed', last_error = ?
+       WHERE id = ?`,
+      [message, jobRecipient.id]
+    );
+  }
+}
+
+async function resumeDistributionJobs() {
+  try {
+    const jobs = await dbAll(
+      "SELECT id FROM distribution_jobs WHERE status IN ('Queued', 'Sending') ORDER BY id ASC",
+      []
+    );
+    jobs.forEach(job => processDistributionJob(job.id));
+  } catch (err) {
+    console.error('Resume distribution jobs error:', err);
+  }
+}
 
 // Email preview for a publication (local browser render)
 app.get('/publications/:id/email-preview', async (req, res) => {
@@ -1660,28 +2029,39 @@ app.get('/publications/:id/download', (req, res) => {
 
 // Matching logic
 function matches(publication, customer) {
-  const pubProducts = publication.products ? publication.products.split(';').map(p => p.trim()) : [];
-  const custProducts = customer.products ? customer.products.split(';').map(p => p.trim()) : [];
-  const productMatch = custProducts.includes('All Products') || pubProducts.some(p => custProducts.includes(p));
+  const pubProducts = splitStoredList(publication.products);
+  const custProducts = splitStoredList(customer.products);
+  const productMatch =
+    includesMatchValue(pubProducts, 'All Products') ||
+    includesMatchValue(custProducts, 'All Products') ||
+    hasAnyMatch(pubProducts, custProducts);
 
-  const pubMarkets = publication.markets ? publication.markets.split(';').map(m => m.trim()) : [];
-  const custMarkets = customer.markets ? customer.markets.split(';').map(m => m.trim()) : [];
-  const marketMatch = custMarkets.includes('All Markets') || pubMarkets.some(m => custMarkets.includes(m));
+  const pubMarkets = splitStoredList(publication.markets);
+  const custMarkets = splitStoredList(customer.markets);
+  const marketMatch =
+    includesMatchValue(pubMarkets, 'All Markets') ||
+    includesMatchValue(custMarkets, 'All Markets') ||
+    hasAnyMatch(pubMarkets, custMarkets);
 
-  const custContentTypes = customer.content_types ? customer.content_types.split(';').map(c => c.trim()) : [];
-  const contentTypeMatch = custContentTypes.includes('All Content Types') || custContentTypes.includes(publication.content_type);
+  const custContentTypes = splitStoredList(customer.content_types);
+  const contentTypeMatch =
+    includesMatchValue(custContentTypes, 'All Content Types') ||
+    includesMatchValue(custContentTypes, publication.content_type);
 
-  const pubRegions = publication.regions ? publication.regions.split(';').map(r => r.trim()) : [];
-  const custRegions = customer.regions ? customer.regions.split(';').map(r => r.trim()) : [];
-  const regionMatch = custRegions.includes('Global') || pubRegions.some(r => custRegions.includes(r));
+  const pubRegions = splitStoredList(publication.regions);
+  const custRegions = splitStoredList(customer.regions);
+  const regionMatch =
+    includesMatchValue(pubRegions, 'Global') ||
+    includesMatchValue(custRegions, 'Global') ||
+    hasAnyMatch(pubRegions, custRegions);
 
   let tierMatch = true;
   if (publication.urgency === 'Critical/Safety') {
     // All tiers
   } else if (publication.urgency === 'High' || publication.urgency === 'Standard') {
-    tierMatch = customer.subscription_tier === 'Standard' || customer.subscription_tier === 'All Announcements';
+    tierMatch = ['standard', 'all announcements'].includes(normalizeMatchValue(customer.subscription_tier));
   } else if (publication.urgency === 'Informational') {
-    tierMatch = customer.subscription_tier === 'All Announcements';
+    tierMatch = normalizeMatchValue(customer.subscription_tier) === 'all announcements';
   }
 
   return productMatch && marketMatch && contentTypeMatch && regionMatch && tierMatch;
@@ -1703,7 +2083,7 @@ function resolveLogoAsset(baseUrl) {
 }
 
 // Send email with document attached
-function sendEmail(publication, customer) {
+async function sendEmail(publication, customer) {
   const shortTitle = publication.title.length > 50 ? publication.title.substring(0, 50).trim() : publication.title;
   const subject = `PSI ${publication.content_type} ${publication.publication_number} – ${shortTitle}`;
   const baseUrl = getBaseUrl();
@@ -1751,16 +2131,12 @@ function sendEmail(publication, customer) {
   }
 
   if (transporter) {
-    transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        console.error('Email send error:', error.message);
-      } else {
-        console.log('Email sent successfully:', info.response);
-      }
-    });
-  } else {
-    console.log('  (SMTP not configured - email logged only)');
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Email sent successfully:', info.response);
+    return { response: info.response };
   }
+  console.log('  (SMTP not configured - email logged only)');
+  return { response: 'SMTP not configured - logged only' };
 }
 
 // Generate email HTML
@@ -1996,10 +2372,10 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
 }
 
 // Log distribution
-function logDistribution(publication, customer) {
-  db.run(`INSERT INTO distribution_logs (publication_number, publication_title, content_type, urgency, recipient_name, recipient_company, recipient_email, match_reason)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [publication.publication_number, publication.title, publication.content_type, publication.urgency, customer.contact_name, customer.company, customer.email, `Products: ${customer.products}, Markets: ${customer.markets}`]);
+function logDistribution(publication, customer, deliveryStatus = 'Sent', matchReason = '') {
+  return dbRun(`INSERT INTO distribution_logs (publication_number, publication_title, content_type, urgency, recipient_name, recipient_company, recipient_email, delivery_status, match_reason)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [publication.publication_number, publication.title, publication.content_type, publication.urgency, customer.contact_name, customer.company, customer.email, deliveryStatus, matchReason]);
 }
 
 // ============================================================
@@ -2388,7 +2764,7 @@ app.post('/logs/:id/resend', async (req, res) => {
       return res.redirect('/logs?error=' + encodeURIComponent('Could not find original publication or customer record'));
     }
 
-    sendEmail(publication, customer);
+    await sendEmail(publication, customer);
 
     await dbRun(`INSERT INTO distribution_logs (publication_number, publication_title, content_type, urgency, recipient_name, recipient_company, recipient_email, delivery_status, match_reason)
                  VALUES (?, ?, ?, ?, ?, ?, ?, 'Resent', ?)`,
@@ -2422,7 +2798,7 @@ app.post('/logs/resend-bulk', express.json(), async (req, res) => {
 
       if (!publication || !customer) continue;
 
-      sendEmail(publication, customer);
+      await sendEmail(publication, customer);
 
       await dbRun(`INSERT INTO distribution_logs (publication_number, publication_title, content_type, urgency, recipient_name, recipient_company, recipient_email, delivery_status, match_reason)
                    VALUES (?, ?, ?, ?, ?, ?, ?, 'Resent', ?)`,
@@ -2566,15 +2942,15 @@ app.post('/settings/metadata/:id/edit', async (req, res) => {
 // ============================================================
 
 app.get('/unsubscribe', async (req, res) => {
-  const email = req.query.email || '';
+  const email = normalizeEmail(req.query.email);
   let message = '';
   let done = false;
 
   if (req.query.confirmed === 'true' && email) {
     try {
-      const customer = await dbGet('SELECT * FROM customers WHERE email = ?', [email]);
+      const customer = await findCustomerByNormalizedEmail(email);
       if (customer) {
-        await dbRun("UPDATE customers SET status = 'Inactive' WHERE email = ?", [email]);
+        await dbRun("UPDATE customers SET status = 'Inactive' WHERE lower(trim(email)) = ?", [email]);
         message = 'You have been unsubscribed. You will no longer receive publication notifications.';
         done = true;
       } else {
@@ -2641,13 +3017,18 @@ app.post('/subscribe', async (req, res) => {
     const { contact_name, company, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier } = req.body;
     const normalizedCustomerType = (customer_type || 'End User').trim() || 'End User';
     const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedCcEmails = normalizeDelimitedEmails(cc_emails);
 
-    if (!contact_name || !company || !email) {
+    if (!contact_name || !company || !normalizedEmail) {
       return res.redirect('/subscribe?error=' + encodeURIComponent('Name, company, and email are required'));
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      return res.redirect('/subscribe?error=' + encodeURIComponent('A valid email is required'));
     }
 
     // Check for existing subscription
-    const existing = await dbGet('SELECT * FROM customers WHERE email = ?', [email]);
+    const existing = await findCustomerByNormalizedEmail(normalizedEmail);
     if (existing) {
       if (existing.status === 'Inactive') {
         // Reactivate
@@ -2658,17 +3039,16 @@ app.post('/subscribe', async (req, res) => {
         } else if (existingCustomerId) {
           reactivatedCustomerId = existingCustomerId;
         } else {
-          const count = await dbGet('SELECT COUNT(*) as c FROM customers');
-          reactivatedCustomerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+          reactivatedCustomerId = generateSelfCustomerId();
         }
         await dbRun("UPDATE customers SET status = 'Active', contact_name = ?, company = ?, customer_id = ?, products = ?, markets = ?, content_types = ?, regions = ?, customer_type = ?, subscription_tier = ?, cc_emails = ? WHERE id = ?",
-          [contact_name, company,
+          [normalizeText(contact_name), normalizeText(company),
            reactivatedCustomerId,
            Array.isArray(products) ? products.join('; ') : (products || ''),
            Array.isArray(markets) ? markets.join('; ') : (markets || ''),
            Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
            Array.isArray(regions) ? regions.join('; ') : (regions || ''),
-           normalizedCustomerType, subscription_tier || 'All Announcements', cc_emails || '', existing.id]);
+            normalizedCustomerType, subscription_tier || 'All Announcements', normalizedCcEmails, existing.id]);
         return res.redirect('/subscribe?success=' + encodeURIComponent('Welcome back! Your subscription has been reactivated.'));
       }
       return res.redirect('/subscribe?error=' + encodeURIComponent('This email is already subscribed. Contact support to update your profile.'));
@@ -2677,13 +3057,12 @@ app.post('/subscribe', async (req, res) => {
     let customerId = '';
     if (!isInternalEmployee) {
       // Generate customer ID for external self-signups
-      const count = await dbGet('SELECT COUNT(*) as c FROM customers');
-      customerId = 'SELF-' + String(count.c + 1).padStart(5, '0');
+      customerId = generateSelfCustomerId();
     }
 
     await dbRun(`INSERT INTO customers (contact_name, company, customer_id, email, cc_emails, products, markets, content_types, regions, customer_type, subscription_tier, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
-      [contact_name, company, customerId, email, cc_emails || '',
+      [normalizeText(contact_name), normalizeText(company), customerId, normalizedEmail, normalizedCcEmails,
        Array.isArray(products) ? products.join('; ') : (products || ''),
        Array.isArray(markets) ? markets.join('; ') : (markets || ''),
        Array.isArray(content_types) ? content_types.join('; ') : (content_types || ''),
@@ -2701,8 +3080,13 @@ app.post('/subscribe', async (req, res) => {
 // HEALTH CHECK
 // ============================================================
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  try {
+    await dbGet('SELECT 1 as ok');
+    res.status(200).json({ status: 'ok', database: 'ok', timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ status: 'error', database: 'error', timestamp: new Date().toISOString() });
+  }
 });
 
 // ============================================================

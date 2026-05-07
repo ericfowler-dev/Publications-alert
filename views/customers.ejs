@@ -7,12 +7,14 @@ function customersQuery(overrides) {
     const searchValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'search') ? overrides.search : search;
     const statusValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'status') ? overrides.status : statusFilter;
     const tierValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'tier') ? overrides.tier : tierFilter;
+    const duplicatesValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'duplicates') ? overrides.duplicates : duplicatesFilter;
     const sortValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'sort') ? overrides.sort : sortBy;
     const dirValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'dir') ? overrides.dir : sortDir;
 
     if (searchValue) params.set('search', searchValue);
     if (statusValue) params.set('status', statusValue);
     if (tierValue) params.set('tier', tierValue);
+    if (duplicatesValue) params.set('duplicates', duplicatesValue);
     if (sortValue) params.set('sort', sortValue);
     if (dirValue) params.set('dir', dirValue);
 
@@ -46,6 +48,7 @@ function sortArrow(column) {
         <a href="/customers/import-template" class="btn btn-secondary"><i class="bi bi-download"></i> Template .xlsx</a>
         <a href="/customers/import-template.csv" class="btn btn-secondary"><i class="bi bi-download"></i> Template .csv</a>
         <a href="/customers/export<%= customersQuery({}) %>" class="btn btn-secondary"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
+        <a href="/customers<%= customersQuery({ duplicates: duplicatesFilter ? '' : '1' }) %>" class="btn btn-secondary"><i class="bi bi-intersect"></i> <%= duplicatesFilter ? 'All Customers' : 'Potential Duplicates' %></a>
         <form action="/customers/import" method="POST" enctype="multipart/form-data" class="import-form">
             <input type="file" id="customerImportInput" name="importFile" accept=".xlsx,.csv" style="display:none;">
             <label for="customerImportInput" class="btn btn-secondary" title="Import customers from .xlsx or .csv"><i class="bi bi-upload"></i> Import .xlsx/.csv</label>
@@ -59,11 +62,12 @@ function sortArrow(column) {
         <input type="text" name="search" placeholder="Search by name, company, or email..." value="<%= search %>" class="search-input">
         <input type="hidden" name="status" value="<%= statusFilter %>">
         <input type="hidden" name="tier" value="<%= tierFilter %>">
+        <input type="hidden" name="duplicates" value="<%= duplicatesFilter %>">
         <input type="hidden" name="sort" value="<%= sortBy %>">
         <input type="hidden" name="dir" value="<%= sortDir %>">
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
-        <% if (search || statusFilter || tierFilter) { %>
-            <a href="/customers<%= customersQuery({ search: '', status: '', tier: '' }) %>" class="btn btn-secondary btn-sm">Clear</a>
+        <% if (search || statusFilter || tierFilter || duplicatesFilter) { %>
+            <a href="/customers<%= customersQuery({ search: '', status: '', tier: '', duplicates: '' }) %>" class="btn btn-secondary btn-sm">Clear</a>
         <% } %>
     </form>
     <div class="filter-group">

@@ -11,6 +11,8 @@ services:
         value: 10000
       - key: BASE_URL
         sync: false
+      - key: SESSION_SECRET
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -21,8 +23,16 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
+      - key: EMAIL_SEND_CONCURRENCY
+        value: 3
+      - key: EMAIL_SEND_BATCH_DELAY_MS
+        value: 250
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 25
+      - key: LOG_ARCHIVE_DAYS
+        value: 180
     healthCheckPath: /health
     disk:
       name: psi-data
       mountPath: /data
-      sizeGB: 1
+      sizeGB: 5

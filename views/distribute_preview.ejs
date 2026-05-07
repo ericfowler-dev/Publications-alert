@@ -200,11 +200,11 @@ function executeDistribute() {
         return;
     }
 
-    if (!confirm('Distribute this publication to ' + ids.length + ' recipient(s)? Emails will be sent immediately.')) return;
+    if (!confirm('Queue this publication for ' + ids.length + ' recipient(s)? Emails will be sent in controlled batches.')) return;
 
     var btn = document.getElementById('distributeBtn');
     btn.disabled = true;
-    btn.textContent = 'Distributing...';
+    btn.textContent = 'Queueing...';
 
     fetch('/publications/<%= publication.id %>/distribute', {
         method: 'POST',
@@ -213,7 +213,7 @@ function executeDistribute() {
     }).then(function(res) { return res.json(); })
       .then(function(data) {
         if (data.success) {
-            location.href = '/publications?success=' + encodeURIComponent('Distributed to ' + data.count + ' recipient(s) successfully');
+            location.href = '/publications?success=' + encodeURIComponent('Queued distribution job #' + data.jobId + ' for ' + data.count + ' recipient(s). Sending will continue in the background.');
         } else {
             btn.disabled = false;
             btn.textContent = 'Distribute to Selected Recipients';

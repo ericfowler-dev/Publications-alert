@@ -136,7 +136,7 @@
                 <select name="subscription_tier" required>
                     <option value="Essential" <%= customer && customer.subscription_tier === 'Essential' ? 'selected' : '' %>>Essential</option>
                     <option value="Standard" <%= customer && customer.subscription_tier === 'Standard' ? 'selected' : '' %>>Standard</option>
-                    <option value="All Announcements" <%= customer && customer.subscription_tier === 'All Announcements' ? 'selected' : '' %>>All Announcements</option>
+                    <option value="All Announcements" <%= !customer || customer.subscription_tier === 'All Announcements' ? 'selected' : '' %>>All Announcements</option>
                 </select>
                 <div class="help-text">Essential = Critical/Safety only | Standard = High + Standard | All Announcements = All urgency levels</div>
             </div>
@@ -176,6 +176,25 @@ document.querySelectorAll('.select-all-toggle').forEach(function(toggle) {
         e.preventDefault();
         var group = this.dataset.group;
         var checkboxes = document.querySelectorAll('input[name="' + group + '"]');
+        var allValues = {
+            products: 'All Products',
+            markets: 'All Markets',
+            content_types: 'All Content Types',
+            regions: 'Global'
+        };
+        var allCheckbox = allValues[group] ? document.querySelector('input[name="' + group + '"][value="' + allValues[group] + '"]') : null;
+        if (allCheckbox) {
+            var shouldSelectAll = !allCheckbox.checked;
+            allCheckbox.checked = shouldSelectAll;
+            checkboxes.forEach(function(cb) {
+                if (cb !== allCheckbox) {
+                    cb.checked = false;
+                    cb.closest('.checkbox-card').classList.toggle('disabled', shouldSelectAll);
+                }
+            });
+            this.textContent = shouldSelectAll ? 'Deselect All' : 'Select All';
+            return;
+        }
         var allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
         checkboxes.forEach(function(cb) { cb.checked = !allChecked; });
         this.textContent = allChecked ? 'Select All' : 'Deselect All';

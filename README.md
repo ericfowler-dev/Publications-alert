@@ -84,6 +84,17 @@ Currently, emails are logged to console for testing.
 - Tables: `customers`, `publications`, `distribution_logs`
 - Data persists between server restarts
 
+## Production Data Retention
+
+- On Render, production data is stored under the persistent `/data` disk:
+  - `/data/publications.db` for customers, publications, logs, and distribution jobs
+  - `/data/uploads` for publication files and import sessions
+  - `/data/exports` for generated log archives
+- Keep the same Render service and disk attached during revisions. Recreating the service or disk will create a new empty data volume.
+- Set `SESSION_SECRET` in production so admin sessions survive deploys/restarts.
+- Before schema-changing deploys, take a copy or snapshot of `/data/publications.db`.
+- Distribution sends are queued in the database and processed in controlled batches using `EMAIL_SEND_CONCURRENCY` and `EMAIL_SEND_BATCH_DELAY_MS`.
+
 ## Matching Logic
 
 Publications are distributed to customers when ALL of these conditions are met:

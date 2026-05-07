@@ -5,3 +5,7 @@ uploads/
 .claude/
 *.log
 .DS_Store
+env_sendmail/
+all_sendgrid_dns_info*
+all sendgrid DNS info.jpg
+email_preview_check.html

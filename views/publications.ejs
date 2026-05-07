@@ -57,6 +57,8 @@ function publicationsQuery(overrides) {
     <div class="filter-group">
         <span class="filter-label">Status:</span>
         <a href="/publications<%= publicationsQuery({ status: 'Draft', page: 1 }) %>" class="filter-pill <%= statusFilter === 'Draft' ? 'active' : '' %>">Draft</a>
+        <a href="/publications<%= publicationsQuery({ status: 'Queued', page: 1 }) %>" class="filter-pill <%= statusFilter === 'Queued' ? 'active' : '' %>">Queued</a>
+        <a href="/publications<%= publicationsQuery({ status: 'Sending', page: 1 }) %>" class="filter-pill <%= statusFilter === 'Sending' ? 'active' : '' %>">Sending</a>
         <a href="/publications<%= publicationsQuery({ status: 'Distributed', page: 1 }) %>" class="filter-pill <%= statusFilter === 'Distributed' ? 'active' : '' %>">Distributed</a>
         <span class="filter-label" style="margin-left: 12px;">Urgency:</span>
         <a href="/publications<%= publicationsQuery({ urgency: 'Critical/Safety', page: 1 }) %>" class="filter-pill <%= urgencyFilter === 'Critical/Safety' ? 'active' : '' %>">Critical</a>
