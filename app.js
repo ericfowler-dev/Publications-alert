@@ -2147,6 +2147,7 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
   const unsubscribeUrl = `${baseUrl}/unsubscribe?email=${encodeURIComponent(customerEmail || '')}`;
   const logoAsset = resolveLogoAsset(baseUrl);
   const logoSrc = options.logoSrc || (logoAsset ? logoAsset.publicUrl : '');
+  const emailFont = 'Arial, Helvetica, sans-serif';
 
   const escapeHtml = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -2205,7 +2206,7 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
 
   const actionBlock = publication.action_required ? `
                 <div style="border-left:4px solid ${urgencyStyle.accent}; background-color:${urgencyStyle.actionBg}; padding:14px 16px; margin:18px 0 16px 0; border-radius:8px;">
-                  <div style="font-size:14px; line-height:1.65; color:#334155;">
+                  <div style="font-family:${emailFont}; font-size:14px; line-height:21px; color:#334155;">
                     <strong style="color:#111827;">Action Required</strong><br>
                     ${formatText(publication.action_required)}
                   </div>
@@ -2218,13 +2219,16 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="x-apple-disable-message-reformatting">
     <title>PSI ${escapeHtml(pubLabel)}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
     <style>
       body {
         margin: 0;
         padding: 0;
         background-color: #f3f4f6;
-        font-family: Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      body, table, td, div, span, a {
+        font-family: Arial, Helvetica, sans-serif !important;
+        mso-line-height-rule: exactly;
       }
       .email-shell {
         width: 1120px;
@@ -2250,27 +2254,27 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
       }
     </style>
   </head>
-  <body>
+  <body style="margin:0; padding:0; background-color:#f3f4f6; font-family:${emailFont};">
     <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent;">
       ${escapeHtml(pubLabel)}. ${escapeHtml(publication.title || '')}.
     </div>
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f3f4f6;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#f3f4f6; font-family:${emailFont};">
       <tr>
-        <td align="center" style="padding:28px 16px;">
-          <table role="presentation" cellpadding="0" cellspacing="0" width="1120" class="email-shell" style="border-collapse:collapse;">
+        <td align="center" style="padding:28px 16px; font-family:${emailFont};">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="1120" class="email-shell" style="border-collapse:collapse; font-family:${emailFont};">
             <tr>
-              <td style="padding:22px 28px; background-color:#43a047; color:#ffffff;">
-                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+              <td style="padding:22px 28px; background-color:#43a047; color:#ffffff; font-family:${emailFont};">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-family:${emailFont};">
                   <tr>
-                    <td style="vertical-align:middle; padding-right:12px;">
-                      <div style="font-size:22px; line-height:1.2; font-weight:700; letter-spacing:0.2px; text-transform:uppercase;">
+                    <td style="vertical-align:middle; padding-right:12px; font-family:${emailFont};">
+                      <div style="font-family:${emailFont}; font-size:16px; line-height:22px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:#ffffff;">
                         POWER SOLUTIONS INTERNATIONAL
                       </div>
-                      <div style="font-size:13px; opacity:0.95; margin-top:4px; font-weight:500;">
+                      <div style="font-family:${emailFont}; font-size:14px; line-height:20px; color:#ffffff; margin-top:4px; font-weight:400;">
                         Publication Notification
                       </div>
                     </td>
-                    <td align="right" style="vertical-align:middle; white-space:nowrap;">
+                    <td align="right" style="vertical-align:middle; white-space:nowrap; font-family:${emailFont};">
                       ${logoSrc ? `<img src="${logoSrc}" alt="PSI logo" width="148" style="display:block; width:148px; max-width:148px; height:auto; border:0; outline:none; text-decoration:none;">` : ''}
                     </td>
                   </tr>
@@ -2281,65 +2285,65 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
               <td style="padding:0;">
                 <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
                   <tr>
-                    <td class="main-col" width="69%" style="padding:30px; border-right:1px solid #e2e8f0; vertical-align:top;">
+                    <td class="main-col" width="69%" style="padding:30px; border-right:1px solid #e2e8f0; vertical-align:top; font-family:${emailFont};">
                       <div style="margin-bottom:22px;">
-                        <div style="font-size:12px; letter-spacing:1.3px; text-transform:uppercase; color:#43a047; font-weight:700; margin-bottom:8px;">
+                        <div style="font-family:${emailFont}; font-size:11px; line-height:16px; letter-spacing:0; text-transform:uppercase; color:#2f7d32; font-weight:700; margin-bottom:8px;">
                           Bulletin ID: ${escapeHtml(pubLabel)}
                         </div>
-                        <div style="font-size:34px; line-height:1.25; font-weight:700; color:#0f172a;">
+                        <div style="font-family:${emailFont}; font-size:22px; line-height:28px; font-weight:700; color:#111827;">
                           ${titleText}
                         </div>
                       </div>
 
-                      <div style="font-size:19px; line-height:1.3; font-weight:700; color:#1f2937; margin:0 0 10px 0;">Summary</div>
-                      <div style="font-size:15px; line-height:1.75; color:#475569; margin:0 0 6px 0;">
+                      <div style="font-family:${emailFont}; font-size:14px; line-height:20px; font-weight:700; color:#111827; margin:0 0 10px 0;">Summary</div>
+                      <div style="font-family:${emailFont}; font-size:14px; line-height:21px; color:#334155; margin:0 0 6px 0;">
                         ${summaryText}
                       </div>
 
                       ${actionBlock}
 
                       ${fileLabel ? `<div style="margin-top:20px; border:1px solid #e2e8f0; background-color:#f8fafc; border-radius:10px; padding:14px 16px;">
-                        <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:#64748b; font-weight:700; margin-bottom:8px;">Attached Documentation</div>
-                        <div style="font-size:14px; color:#0f172a; font-weight:600; line-height:1.45;">
+                        <div style="font-family:${emailFont}; font-size:11px; line-height:16px; text-transform:uppercase; letter-spacing:0; color:#64748b; font-weight:700; margin-bottom:8px;">Attached Documentation</div>
+                        <div style="font-family:${emailFont}; font-size:14px; color:#111827; font-weight:600; line-height:21px;">
                           ${fileLabel}
                         </div>
                       </div>` : ''}
 
                     </td>
-                    <td class="side-col" width="31%" style="padding:30px; background-color:#f8fafc; vertical-align:top;">
+                    <td class="side-col" width="31%" style="padding:30px; background-color:#f8fafc; vertical-align:top; font-family:${emailFont};">
                       <div style="margin-bottom:20px;">
-                        <div style="font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:#94a3b8; margin-bottom:10px;">Service Details</div>
+                        <div style="font-family:${emailFont}; font-size:11px; line-height:16px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:#64748b; margin-bottom:10px;">Service Details</div>
                         <div style="padding:0 0 12px 0;">
-                          <div style="font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#64748b; font-weight:700; margin-bottom:4px;">Release Date</div>
-                          <div style="font-size:14px; color:#0f172a; font-weight:600;">${escapeHtml(releaseDate)}</div>
+                          <div style="font-family:${emailFont}; font-size:11px; line-height:16px; text-transform:uppercase; letter-spacing:0; color:#64748b; font-weight:700; margin-bottom:4px;">Release Date</div>
+                          <div style="font-family:${emailFont}; font-size:14px; line-height:21px; color:#111827; font-weight:600;">${escapeHtml(releaseDate)}</div>
                         </div>
-                        <div style="font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#64748b; font-weight:700; margin-bottom:6px;">Priority</div>
-                        <span style="display:inline-block; padding:5px 10px; border-radius:999px; font-size:12px; font-weight:700; background-color:${urgencyStyle.bg}; color:${urgencyStyle.fg}; border:1px solid ${urgencyStyle.border};">
+                        <div style="font-family:${emailFont}; font-size:11px; line-height:16px; text-transform:uppercase; letter-spacing:0; color:#64748b; font-weight:700; margin-bottom:6px;">Priority</div>
+                        <span style="display:inline-block; padding:4px 8px; border-radius:999px; font-family:${emailFont}; font-size:14px; line-height:20px; font-weight:700; background-color:${urgencyStyle.bg}; color:${urgencyStyle.fg}; border:1px solid ${urgencyStyle.border};">
                           ${escapeHtml(urgency)}
                         </span>
                       </div>
 
                       <div style="height:1px; background:#e2e8f0; margin:0 0 20px 0;"></div>
 
-                      <div style="font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:#94a3b8; margin-bottom:10px;">Applies To</div>
+                      <div style="font-family:${emailFont}; font-size:11px; line-height:16px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:#64748b; margin-bottom:10px;">Applies To</div>
                       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
                         <tr>
-                          <td style="width:62px; padding:0 8px 8px 0; font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">Prod</td>
-                          <td style="padding:0 0 8px 0; font-size:13px; color:#334155; line-height:1.45;">${escapeHtml(productsCompact)}</td>
+                          <td style="width:62px; padding:0 8px 8px 0; font-family:${emailFont}; font-size:11px; line-height:16px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0;">Prod</td>
+                          <td style="padding:0 0 8px 0; font-family:${emailFont}; font-size:14px; color:#334155; line-height:21px;">${escapeHtml(productsCompact)}</td>
                         </tr>
                         <tr>
-                          <td style="width:62px; padding:0 8px 8px 0; font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">Mkt</td>
-                          <td style="padding:0 0 8px 0; font-size:13px; color:#334155; line-height:1.45;">${escapeHtml(marketsCompact)}</td>
+                          <td style="width:62px; padding:0 8px 8px 0; font-family:${emailFont}; font-size:11px; line-height:16px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0;">Mkt</td>
+                          <td style="padding:0 0 8px 0; font-family:${emailFont}; font-size:14px; color:#334155; line-height:21px;">${escapeHtml(marketsCompact)}</td>
                         </tr>
                         <tr>
-                          <td style="width:62px; padding:0 8px 0 0; font-size:10px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0.8px;">Reg</td>
-                          <td style="padding:0; font-size:13px; color:#334155; line-height:1.45;">${escapeHtml(regionsCompact)}</td>
+                          <td style="width:62px; padding:0 8px 0 0; font-family:${emailFont}; font-size:11px; line-height:16px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:0;">Reg</td>
+                          <td style="padding:0; font-family:${emailFont}; font-size:14px; color:#334155; line-height:21px;">${escapeHtml(regionsCompact)}</td>
                         </tr>
                       </table>
 
                       <div style="margin-top:20px; border-top:1px solid #e2e8f0; padding-top:16px;">
-                        <div style="font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#64748b; margin-bottom:8px;">Need Help?</div>
-                        <div style="font-size:12px; color:#475569; line-height:1.55;">
+                        <div style="font-family:${emailFont}; font-size:11px; line-height:16px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:#64748b; margin-bottom:8px;">Need Help?</div>
+                        <div style="font-family:${emailFont}; font-size:14px; color:#475569; line-height:21px;">
                           Contact Technical Support or reply directly to this notification.
                         </div>
                       </div>
@@ -2349,15 +2353,15 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
               </td>
             </tr>
             <tr>
-              <td style="padding:16px 28px; background-color:#f1f5f9; border-top:1px solid #e2e8f0;">
-                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+              <td style="padding:16px 28px; background-color:#f1f5f9; border-top:1px solid #e2e8f0; font-family:${emailFont};">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-family:${emailFont};">
                   <tr>
-                    <td style="font-size:11px; color:#64748b; line-height:1.55;">
+                    <td style="font-family:${emailFont}; font-size:11px; color:#64748b; line-height:16px;">
                       You received this notification based on your PSI distribution profile.<br>
                       &copy; ${new Date().getFullYear()} Power Solutions International. All rights reserved.
                     </td>
-                    <td align="right" style="white-space:nowrap; font-size:11px; color:#64748b;">
-                      <a href="${unsubscribeUrl}" style="color:#4b647d; text-decoration:underline; font-weight:600;">Unsubscribe</a>
+                    <td align="right" style="white-space:nowrap; font-family:${emailFont}; font-size:11px; color:#64748b;">
+                      <a href="${unsubscribeUrl}" style="font-family:${emailFont}; font-size:11px; line-height:16px; color:#4b647d; text-decoration:underline; font-weight:600;">Unsubscribe</a>
                     </td>
                   </tr>
                 </table>

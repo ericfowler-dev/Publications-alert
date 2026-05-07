@@ -30,6 +30,17 @@ function sortArrow(column) {
     if (sortBy !== column) return '';
     return sortDir === 'asc' ? ' ▲' : ' ▼';
 }
+
+function badgeClass(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function formatDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 %>
 
 <% if (success) { %>
@@ -112,6 +123,7 @@ function sortArrow(column) {
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'subscription_tier', dir: nextSortDir('subscription_tier') }) %>">Tier<%= sortArrow('subscription_tier') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'status', dir: nextSortDir('status') }) %>">Status<%= sortArrow('status') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'customer_type', dir: nextSortDir('customer_type') }) %>">Type<%= sortArrow('customer_type') %></a></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'date_added', dir: nextSortDir('date_added') }) %>">Added<%= sortArrow('date_added') %></a></th>
                         <th style="width: 120px;">Actions</th>
                     </tr>
                 </thead>
@@ -159,7 +171,7 @@ function sortArrow(column) {
                                 <span class="text-muted">None</span>
                             <% } %>
                         </td>
-                        <td><span class="badge badge-<%= customer.subscription_tier ? customer.subscription_tier.toLowerCase() : '' %>"><%= customer.subscription_tier %></span></td>
+                        <td><span class="badge badge-<%= badgeClass(customer.subscription_tier) %>"><%= customer.subscription_tier %></span></td>
                         <td><span class="badge badge-<%= customer.status.toLowerCase() %>"><%= customer.status %></span></td>
                         <td>
                             <% if (isInternal) { %>
@@ -168,6 +180,7 @@ function sortArrow(column) {
                                 <%= customer.customer_type || '-' %>
                             <% } %>
                         </td>
+                        <td><%= formatDate(customer.date_added) %></td>
                         <td class="actions">
                             <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit customer"><i class="bi bi-pencil"></i> Edit</a>
                             <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">
