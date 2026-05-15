@@ -111,7 +111,6 @@ if (archivedFilter) logFilterChips.push({ label: 'View', value: 'Archived' });
         <button type="button" class="btn btn-sm" onclick="bulkArchive()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
     <% } else { %>
         <button type="button" class="btn btn-primary btn-sm" onclick="bulkRestore()"><i class="bi bi-arrow-counterclockwise"></i> Restore Selected</button>
-        <button type="button" class="btn btn-sm" onclick="bulkDeletePermanent()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Permanently</button>
     <% } %>
     <button type="button" class="btn btn-secondary btn-sm" onclick="copySelectedEmails()"><i class="bi bi-clipboard"></i> Copy Emails</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="exportSelectedLogs()"><i class="bi bi-file-earmark-spreadsheet"></i> Export Selected</button>

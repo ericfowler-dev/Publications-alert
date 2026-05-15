@@ -1,33 +1,77 @@
-<nav class="sidebar">
+<button type="button" class="sidebar-mobile-toggle" id="sidebarMobileToggle" aria-label="Open navigation" title="Open navigation">
+    <i class="bi bi-list"></i>
+</button>
+<nav class="sidebar" id="adminSidebar">
     <div class="sidebar-header">
-        <img src="/images/psi-logo.svg" alt="PSI - Power Solutions International" style="height: 38px; width: auto;">
-        <div class="sidebar-subtitle">Publication Distribution</div>
+        <div class="sidebar-brand">
+            <img src="/images/psi-logo.svg" alt="PSI - Power Solutions International">
+            <div class="sidebar-subtitle">Publication Distribution</div>
+        </div>
+        <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Collapse navigation" title="Collapse navigation">
+            <i class="bi bi-layout-sidebar-inset"></i>
+        </button>
     </div>
     <div class="sidebar-nav">
-        <a href="/" class="<%= currentPage === 'home' ? 'active' : '' %>">
+        <a href="/" class="<%= currentPage === 'home' ? 'active' : '' %>" aria-label="Dashboard" title="Dashboard">
             <span class="nav-icon"><i class="bi bi-speedometer2"></i></span>
             <span class="nav-text">Dashboard</span>
         </a>
-        <a href="/customers" class="<%= currentPage === 'customers' ? 'active' : '' %>">
+        <a href="/customers" class="<%= currentPage === 'customers' ? 'active' : '' %>" aria-label="Customers" title="Customers">
             <span class="nav-icon"><i class="bi bi-people"></i></span>
             <span class="nav-text">Customers</span>
         </a>
-        <a href="/publications" class="<%= currentPage === 'publications' ? 'active' : '' %>">
+        <a href="/publications" class="<%= currentPage === 'publications' ? 'active' : '' %>" aria-label="Publications" title="Publications">
             <span class="nav-icon"><i class="bi bi-file-earmark-text"></i></span>
             <span class="nav-text">Publications</span>
         </a>
-        <a href="/logs" class="<%= currentPage === 'logs' ? 'active' : '' %>">
+        <a href="/logs" class="<%= currentPage === 'logs' ? 'active' : '' %>" aria-label="Distribution Logs" title="Distribution Logs">
             <span class="nav-icon"><i class="bi bi-clock-history"></i></span>
             <span class="nav-text">Distribution Logs</span>
         </a>
-        <a href="/settings" class="<%= currentPage === 'settings' ? 'active' : '' %>">
+        <a href="/settings" class="<%= currentPage === 'settings' ? 'active' : '' %>" aria-label="Settings" title="Settings">
             <span class="nav-icon"><i class="bi bi-gear"></i></span>
             <span class="nav-text">Settings</span>
         </a>
     </div>
     <div class="sidebar-footer">
-        <a href="/logout" style="color: rgba(255,255,255,0.5); font-size: 12px; text-decoration: none;"><i class="bi bi-box-arrow-left"></i> Sign Out</a>
+        <a href="/logout" class="sidebar-signout"><i class="bi bi-box-arrow-left"></i> <span class="signout-text">Sign Out</span></a>
         <br><small>&copy; 2026 Power Solutions International &middot; v1.0</small>
     </div>
 </nav>
 <main class="main-content">
+<script>
+(function() {
+    var root = document.documentElement;
+    var sidebar = document.getElementById('adminSidebar');
+    var toggle = document.getElementById('sidebarToggle');
+    var mobileToggle = document.getElementById('sidebarMobileToggle');
+
+    function syncToggleLabel() {
+        if (!toggle) return;
+        var collapsed = root.classList.contains('sidebar-collapsed');
+        toggle.setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation');
+        toggle.setAttribute('title', collapsed ? 'Expand navigation' : 'Collapse navigation');
+        var icon = toggle.querySelector('i');
+        if (icon) {
+            icon.className = collapsed ? 'bi bi-layout-sidebar-inset-reverse' : 'bi bi-layout-sidebar-inset';
+        }
+    }
+
+    if (toggle) {
+        toggle.addEventListener('click', function() {
+            var collapsed = !root.classList.contains('sidebar-collapsed');
+            root.classList.toggle('sidebar-collapsed', collapsed);
+            try { localStorage.setItem('psiSidebarCollapsed', collapsed ? 'true' : 'false'); } catch (err) {}
+            syncToggleLabel();
+        });
+    }
+
+    if (mobileToggle && sidebar) {
+        mobileToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('open');
+        });
+    }
+
+    syncToggleLabel();
+})();
+</script>

@@ -81,10 +81,10 @@
                 <div class="form-group">
                     <label>Customer Type</label>
                     <select name="customer_type">
-                        <option value="OEM">OEM</option>
+                        <option value="OEM" selected>OEM</option>
                         <option value="Distributor">Distributor</option>
                         <option value="Dealer">Dealer</option>
-                        <option value="End User" selected>End User</option>
+                        <option value="End User">End User</option>
                         <option value="Internal">Internal</option>
                     </select>
                     <div class="help-text" id="subscribeInternalHelp">Internal employees are marked as internal and no customer ID is assigned.</div>
@@ -143,7 +143,7 @@
                 <div class="checkbox-grid">
                     <% metadata.content_types.forEach(function(ct) { %>
                     <label class="checkbox-card">
-                        <input type="checkbox" name="content_types" value="<%= ct %>">
+                        <input type="checkbox" name="content_types" value="<%= ct %>" <%= ct === 'All Content Types' ? 'checked' : '' %>>
                         <span class="checkbox-label"><%= ct %></span>
                     </label>
                     <% }); %>
@@ -158,7 +158,7 @@
                 <div class="checkbox-grid">
                     <% metadata.regions.forEach(function(region) { %>
                     <label class="checkbox-card">
-                        <input type="checkbox" name="regions" value="<%= region %>">
+                        <input type="checkbox" name="regions" value="<%= region %>" <%= region === 'Global' ? 'checked' : '' %>>
                         <span class="checkbox-label"><%= region %></span>
                     </label>
                     <% }); %>
@@ -233,6 +233,10 @@ function setupAllToggle(allValue, groupName) {
             }
         });
     });
+
+    if (allCheckbox.checked) {
+        others.forEach(function(cb) { cb.checked = false; cb.closest('.checkbox-card').classList.add('disabled'); });
+    }
 }
 
 setupAllToggle('All Products', 'products');

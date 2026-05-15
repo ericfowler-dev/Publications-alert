@@ -379,6 +379,62 @@ function buildLogFilters(filters) {
   return { whereSql, whereParams };
 }
 
+function firstQueryValue(value) {
+  if (Array.isArray(value)) return String(value[0] || '').trim();
+  return String(value || '').trim();
+}
+
+function buildCustomerFilters(filters) {
+  filters = filters || {};
+  const whereParams = [];
+  let whereSql = 'WHERE 1=1';
+  const filterValues = {
+    search: firstQueryValue(filters.search),
+    contact_name: firstQueryValue(filters.contact_name),
+    company: firstQueryValue(filters.company),
+    email: firstQueryValue(filters.email),
+    products: firstQueryValue(filters.products),
+    markets: firstQueryValue(filters.markets),
+    content_types: firstQueryValue(filters.content_types),
+    regions: firstQueryValue(filters.regions),
+    customer_type: firstQueryValue(filters.customer_type),
+    status: firstQueryValue(filters.status),
+    tier: firstQueryValue(filters.tier),
+    date_added: firstQueryValue(filters.date_added)
+  };
+
+  if (filterValues.search) {
+    whereSql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ? OR customer_id LIKE ? OR products LIKE ? OR markets LIKE ? OR content_types LIKE ? OR regions LIKE ?)';
+    const s = `%${filterValues.search}%`;
+    whereParams.push(s, s, s, s, s, s, s, s);
+  }
+
+  ['contact_name', 'company', 'email', 'products', 'markets', 'content_types', 'regions'].forEach(column => {
+    if (!filterValues[column]) return;
+    whereSql += ` AND ${column} LIKE ?`;
+    whereParams.push(`%${filterValues[column]}%`);
+  });
+
+  if (filterValues.customer_type) {
+    whereSql += ' AND customer_type = ?';
+    whereParams.push(filterValues.customer_type);
+  }
+  if (filterValues.status) {
+    whereSql += ' AND status = ?';
+    whereParams.push(filterValues.status);
+  }
+  if (filterValues.tier) {
+    whereSql += ' AND subscription_tier = ?';
+    whereParams.push(filterValues.tier);
+  }
+  if (filterValues.date_added) {
+    whereSql += ' AND date(date_added) = date(?)';
+    whereParams.push(filterValues.date_added);
+  }
+
+  return { whereSql, whereParams, filterValues };
+}
+
 async function archiveOldLogs() {
   if (!LOG_ARCHIVE_ENABLED) return;
   try {
@@ -605,10 +661,10 @@ app.get('/', async (req, res) => {
   try {
     const totalCustomers = (await dbGet('SELECT COUNT(*) as c FROM customers')).c;
     const activeCustomers = (await dbGet("SELECT COUNT(*) as c FROM customers WHERE status = 'Active'")).c;
-    const totalPublications = (await dbGet('SELECT COUNT(*) as c FROM publications')).c;
-    const distributedPublications = (await dbGet("SELECT COUNT(*) as c FROM publications WHERE distribution_status = 'Distributed'")).c;
+    const totalPublications = (await dbGet('SELECT COUNT(*) as c FROM publications WHERE is_archived IS NULL OR is_archived = 0')).c;
+    const distributedPublications = (await dbGet("SELECT COUNT(*) as c FROM publications WHERE distribution_status = 'Distributed' AND (is_archived IS NULL OR is_archived = 0)")).c;
     const totalLogs = (await dbGet('SELECT COUNT(*) as c FROM distribution_logs')).c;
-    const recentPublications = await dbAll('SELECT * FROM publications ORDER BY id DESC LIMIT 5');
+    const recentPublications = await dbAll('SELECT * FROM publications WHERE is_archived IS NULL OR is_archived = 0 ORDER BY id DESC LIMIT 5');
     const recentLogs = await dbAll('SELECT * FROM distribution_logs ORDER BY sent_date DESC LIMIT 10');
 
     res.render('index', {
@@ -628,7 +684,7 @@ app.get('/', async (req, res) => {
 
 app.get('/customers', async (req, res) => {
   try {
-    const { search, status, tier, sort, dir, duplicates } = req.query;
+    const { sort, dir, duplicates } = req.query;
     const showDuplicates = parseBoolean(duplicates);
     const customerSortColumns = {
       contact_name: 'contact_name',
@@ -643,22 +699,10 @@ app.get('/customers', async (req, res) => {
     const sortBy = customerSortColumns[sort] ? sort : 'company';
     const sortDir = toSortDir(dir, 'asc');
 
-    let sql = 'SELECT * FROM customers WHERE 1=1';
-    const params = [];
+    const filterParts = buildCustomerFilters(req.query);
+    let sql = `SELECT * FROM customers ${filterParts.whereSql}`;
+    const params = filterParts.whereParams.slice();
 
-    if (search) {
-      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ? OR customer_id LIKE ?)';
-      const s = `%${search}%`;
-      params.push(s, s, s, s);
-    }
-    if (status) {
-      sql += ' AND status = ?';
-      params.push(status);
-    }
-    if (tier) {
-      sql += ' AND subscription_tier = ?';
-      params.push(tier);
-    }
     if (showDuplicates) {
       sql += ` AND lower(trim(email)) IN (
         SELECT lower(trim(email))
@@ -671,11 +715,14 @@ app.get('/customers', async (req, res) => {
     sql += ` ORDER BY ${customerSortColumns[sortBy]} ${sortDir.toUpperCase()}, contact_name ASC`;
 
     const customers = await dbAll(sql, params);
+    const metadata = await getMetadata();
     res.render('customers', {
       customers,
-      search: search || '',
-      statusFilter: status || '',
-      tierFilter: tier || '',
+      metadata,
+      search: filterParts.filterValues.search,
+      statusFilter: filterParts.filterValues.status,
+      tierFilter: filterParts.filterValues.tier,
+      customerFilters: filterParts.filterValues,
       duplicatesFilter: showDuplicates ? '1' : '',
       sortBy,
       sortDir,
@@ -690,7 +737,8 @@ app.get('/customers', async (req, res) => {
 
 app.get('/customers/export', async (req, res) => {
   try {
-    const { search, status, tier, sort, dir } = req.query;
+    const { sort, dir, duplicates } = req.query;
+    const showDuplicates = parseBoolean(duplicates);
     const customerSortColumns = {
       contact_name: 'contact_name',
       company: 'company',
@@ -704,15 +752,18 @@ app.get('/customers/export', async (req, res) => {
     const sortBy = customerSortColumns[sort] ? sort : 'company';
     const sortDir = toSortDir(dir, 'asc');
 
-    let sql = 'SELECT * FROM customers WHERE 1=1';
-    const params = [];
-    if (search) {
-      sql += ' AND (contact_name LIKE ? OR company LIKE ? OR email LIKE ? OR customer_id LIKE ?)';
-      const s = `%${search}%`;
-      params.push(s, s, s, s);
+    const filterParts = buildCustomerFilters(req.query);
+    let sql = `SELECT * FROM customers ${filterParts.whereSql}`;
+    const params = filterParts.whereParams.slice();
+    if (showDuplicates) {
+      sql += ` AND lower(trim(email)) IN (
+        SELECT lower(trim(email))
+        FROM customers
+        WHERE email IS NOT NULL AND trim(email) <> ''
+        GROUP BY lower(trim(email))
+        HAVING COUNT(*) > 1
+      )`;
     }
-    if (status) { sql += ' AND status = ?'; params.push(status); }
-    if (tier) { sql += ' AND subscription_tier = ?'; params.push(tier); }
     sql += ` ORDER BY ${customerSortColumns[sortBy]} ${sortDir.toUpperCase()}, contact_name ASC`;
     const customers = await dbAll(sql, params);
 
@@ -774,6 +825,29 @@ const CUSTOMER_TYPE_OPTIONS = ['Internal', 'OEM', 'Dealer', 'Distributor', 'End 
 const SUBSCRIPTION_TIER_OPTIONS = ['Essential', 'Standard', 'All Announcements'];
 const STATUS_OPTIONS = ['Active', 'Inactive', 'Suspended'];
 const FREQUENCY_OPTIONS = ['Immediate', 'Daily Digest', 'Weekly Digest'];
+
+function normalizeBulkList(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item || '').trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.split(/[;,]+/).map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function filterAllowedListValues(values, allowedValues) {
+  const allowedByLower = new Map((allowedValues || []).map(value => [String(value).toLowerCase(), value]));
+  const seen = new Set();
+  const normalized = [];
+  values.forEach(value => {
+    const key = String(value || '').trim().toLowerCase();
+    if (!key || seen.has(key) || !allowedByLower.has(key)) return;
+    seen.add(key);
+    normalized.push(allowedByLower.get(key));
+  });
+  return normalized;
+}
 
 const CUSTOMER_IMPORT_TEMPLATE_COLUMNS = [
   { header: 'Customer ID', key: 'customer_id', width: 16 },
@@ -1380,9 +1454,6 @@ app.post('/customers', async (req, res) => {
     const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
     const normalizedCustomerId = isInternalEmployee ? '' : normalizeText(customer_id);
     const normalizedEmail = normalizeEmail(email);
-    if (!isInternalEmployee && !normalizedCustomerId) {
-      return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
-    }
     if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
       return res.redirect('/customers?error=' + encodeURIComponent('A valid email is required'));
     }
@@ -1438,6 +1509,68 @@ app.post('/customers/delete-bulk', express.json(), async (req, res) => {
   }
 });
 
+app.post('/customers/update-bulk', express.json(), async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids)
+      ? req.body.ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
+      : [];
+    const updates = req.body && typeof req.body.updates === 'object' ? req.body.updates : {};
+    if (!ids.length) {
+      return res.status(400).json({ error: 'No customers selected' });
+    }
+
+    const fields = [];
+    const values = [];
+    const addField = (column, value) => {
+      fields.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (updates.customer_type && CUSTOMER_TYPE_OPTIONS.includes(updates.customer_type)) {
+      addField('customer_type', updates.customer_type);
+      if (updates.customer_type === 'Internal') {
+        addField('customer_id', '');
+      }
+    }
+    if (updates.subscription_tier && SUBSCRIPTION_TIER_OPTIONS.includes(updates.subscription_tier)) {
+      addField('subscription_tier', updates.subscription_tier);
+    }
+    if (updates.preferred_frequency && FREQUENCY_OPTIONS.includes(updates.preferred_frequency)) {
+      addField('preferred_frequency', updates.preferred_frequency);
+    }
+    if (updates.status && STATUS_OPTIONS.includes(updates.status)) {
+      addField('status', updates.status);
+    }
+
+    const metadata = await getMetadata();
+    const listFieldMap = {
+      products: metadata.products,
+      markets: metadata.markets,
+      content_types: metadata.content_types,
+      regions: metadata.regions
+    };
+    Object.entries(listFieldMap).forEach(([field, allowedValues]) => {
+      if (!Object.prototype.hasOwnProperty.call(updates, field)) return;
+      const normalizedValues = filterAllowedListValues(normalizeBulkList(updates[field]), allowedValues);
+      addField(field, normalizedValues.join('; '));
+    });
+
+    if (!fields.length) {
+      return res.status(400).json({ error: 'Choose at least one field to update' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await dbRun(
+      `UPDATE customers SET ${fields.join(', ')} WHERE id IN (${placeholders})`,
+      values.concat(ids)
+    );
+    res.json({ success: true, count: result.changes || ids.length });
+  } catch (err) {
+    console.error('Bulk update customers error:', err);
+    res.status(500).json({ error: 'Failed to update customers' });
+  }
+});
+
 app.get('/customers/:id/edit', async (req, res) => {
   try {
     const metadata = await getMetadata();
@@ -1457,9 +1590,6 @@ app.post('/customers/:id', async (req, res) => {
     const isInternalEmployee = normalizedCustomerType.toLowerCase() === 'internal';
     const normalizedCustomerId = isInternalEmployee ? '' : normalizeText(customer_id);
     const normalizedEmail = normalizeEmail(email);
-    if (!isInternalEmployee && !normalizedCustomerId) {
-      return res.redirect('/customers?error=' + encodeURIComponent('Customer ID is required unless customer type is Internal'));
-    }
     if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
       return res.redirect('/customers?error=' + encodeURIComponent('A valid email is required'));
     }
@@ -2145,6 +2275,7 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
   const releaseDate = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const fileName = publication.file_name || '';
   const unsubscribeUrl = `${baseUrl}/unsubscribe?email=${encodeURIComponent(customerEmail || '')}`;
+  const subscribeUrl = `${baseUrl}/subscribe`;
   const logoAsset = resolveLogoAsset(baseUrl);
   const logoSrc = options.logoSrc || (logoAsset ? logoAsset.publicUrl : '');
   const emailFont = 'Arial, Helvetica, sans-serif';
@@ -2353,6 +2484,14 @@ function generateEmailHTML(publication, customerEmail, options = {}) {
               </td>
             </tr>
             <tr>
+              <td style="padding:18px 28px; background-color:#ffffff; border-top:1px solid #e2e8f0; font-family:${emailFont};">
+                <div style="font-family:${emailFont}; font-size:14px; line-height:21px; color:#334155;">
+                  If you have coworkers who should receive these notifications, please share this link with them so they can sign up for automated updates from our new alert system.<br>
+                  <a href="${escapeHtml(subscribeUrl)}" style="font-family:${emailFont}; font-size:14px; line-height:21px; color:#2f7d32; text-decoration:underline; font-weight:700;">${escapeHtml(subscribeUrl)}</a>
+                </div>
+              </td>
+            </tr>
+            <tr>
               <td style="padding:16px 28px; background-color:#f1f5f9; border-top:1px solid #e2e8f0; font-family:${emailFont};">
                 <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-family:${emailFont};">
                   <tr>
@@ -2415,7 +2554,7 @@ app.get('/logs', async (req, res) => {
 
     const totalRow = await dbGet(`SELECT COUNT(*) as c FROM distribution_logs ${whereSql}`, whereParams);
     const totalLogs = totalRow ? totalRow.c : 0;
-    const perPage = clampNumber(pageSize, 10, 200, 25);
+    const perPage = clampNumber(pageSize, 10, 200, 200);
     const totalPages = Math.max(1, Math.ceil(totalLogs / perPage));
     const currentPage = clampNumber(page, 1, totalPages, 1);
     const offset = (currentPage - 1) * perPage;
@@ -2545,53 +2684,9 @@ app.post('/logs/restore-bulk', express.json(), async (req, res) => {
   }
 });
 
-// Delete selected log entries (permanent)
+// Distribution logs are audit records. They can be archived/restored, but not hard-deleted.
 app.post('/logs/delete-bulk', express.json(), async (req, res) => {
-  try {
-    const permanent = parseBoolean(req.body.permanent);
-    if (!permanent) {
-      return res.status(400).json({ error: 'Permanent delete requires confirmation' });
-    }
-    const applyAll = parseBoolean(req.body.apply_all);
-    if (applyAll) {
-      const filters = req.body.filters || {};
-      const { whereSql, whereParams } = buildLogFilters({
-        search: filters.search,
-        urgency: filters.urgency
-      });
-      const rows = await dbAll(
-        `SELECT id FROM distribution_logs ${whereSql} AND is_archived = 1`,
-        whereParams
-      );
-      if (!rows.length) {
-        return res.status(400).json({ error: 'No archived log entries selected' });
-      }
-      const ids = rows.map(row => row.id);
-      const placeholders = ids.map(() => '?').join(',');
-      await dbRun(`DELETE FROM distribution_logs WHERE id IN (${placeholders})`, ids);
-      return res.json({ success: true, count: ids.length });
-    }
-
-    const ids = Array.isArray(req.body.ids)
-      ? req.body.ids.map(id => parseInt(id, 10)).filter(Number.isInteger)
-      : [];
-    if (!ids.length) {
-      return res.status(400).json({ error: 'No log entries selected' });
-    }
-    const placeholders = ids.map(() => '?').join(',');
-    const rows = await dbAll(`SELECT id, is_archived FROM distribution_logs WHERE id IN (${placeholders})`, ids);
-    const deletable = rows.filter(row => row.is_archived === 1);
-    if (!deletable.length) {
-      return res.status(400).json({ error: 'Only archived logs can be permanently deleted' });
-    }
-    const deleteIds = deletable.map(row => row.id);
-    const deletePlaceholders = deleteIds.map(() => '?').join(',');
-    await dbRun(`DELETE FROM distribution_logs WHERE id IN (${deletePlaceholders})`, deleteIds);
-    res.json({ success: true, count: deleteIds.length });
-  } catch (err) {
-    console.error('Delete logs error:', err);
-    res.status(500).json({ error: 'Failed to delete logs' });
-  }
+  res.status(400).json({ error: 'Distribution logs are retained for audit and cannot be permanently deleted' });
 });
 
 // Export logs to Excel

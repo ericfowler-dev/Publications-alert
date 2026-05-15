@@ -2,19 +2,22 @@
 <%- include('partials/nav', { currentPage: 'customers' }) %>
 
 <%
+const filterValues = customerFilters || {};
+const customerFilterNames = ['search', 'contact_name', 'company', 'email', 'products', 'markets', 'content_types', 'regions', 'customer_type', 'status', 'tier', 'date_added', 'duplicates'];
+function valueFor(name, overrides) {
+    if (Object.prototype.hasOwnProperty.call(overrides || {}, name)) return overrides[name];
+    if (name === 'duplicates') return duplicatesFilter;
+    return filterValues[name] || '';
+}
 function customersQuery(overrides) {
     const params = new URLSearchParams();
-    const searchValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'search') ? overrides.search : search;
-    const statusValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'status') ? overrides.status : statusFilter;
-    const tierValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'tier') ? overrides.tier : tierFilter;
-    const duplicatesValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'duplicates') ? overrides.duplicates : duplicatesFilter;
     const sortValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'sort') ? overrides.sort : sortBy;
     const dirValue = Object.prototype.hasOwnProperty.call(overrides || {}, 'dir') ? overrides.dir : sortDir;
 
-    if (searchValue) params.set('search', searchValue);
-    if (statusValue) params.set('status', statusValue);
-    if (tierValue) params.set('tier', tierValue);
-    if (duplicatesValue) params.set('duplicates', duplicatesValue);
+    customerFilterNames.forEach(function(name) {
+        const val = valueFor(name, overrides);
+        if (val) params.set(name, val);
+    });
     if (sortValue) params.set('sort', sortValue);
     if (dirValue) params.set('dir', dirValue);
 
@@ -39,7 +42,31 @@ function formatDate(value) {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+}
+
+function activeFilterChips() {
+    const labels = {
+        search: 'Search',
+        contact_name: 'Contact',
+        company: 'Company',
+        email: 'Email',
+        products: 'Products',
+        markets: 'Markets',
+        content_types: 'Content Types',
+        regions: 'Regions',
+        customer_type: 'Customer Type',
+        status: 'Status',
+        tier: 'Tier',
+        date_added: 'Date Added',
+        duplicates: 'Potential Duplicates'
+    };
+    return customerFilterNames
+        .map(function(name) {
+            const val = name === 'duplicates' ? duplicatesFilter : (filterValues[name] || '');
+            return val ? { label: labels[name], value: name === 'duplicates' ? 'Yes' : val } : null;
+        })
+        .filter(Boolean);
 }
 %>
 
@@ -55,7 +82,7 @@ function formatDate(value) {
         <h1>Customer Profiles</h1>
         <div class="subtitle"><%= customers.length %> customer(s) found</div>
     </div>
-    <div class="actions">
+    <div class="actions customer-page-actions">
         <a href="/customers/import-template" class="btn btn-secondary"><i class="bi bi-download"></i> Template .xlsx</a>
         <a href="/customers/import-template.csv" class="btn btn-secondary"><i class="bi bi-download"></i> Template .csv</a>
         <a href="/customers/export<%= customersQuery({}) %>" class="btn btn-secondary"><i class="bi bi-file-earmark-spreadsheet"></i> Export .xlsx</a>
@@ -68,30 +95,120 @@ function formatDate(value) {
     </div>
 </div>
 
-<div class="table-toolbar">
-    <form method="GET" action="/customers" class="toolbar-search">
-        <input type="text" name="search" placeholder="Search by name, company, or email..." value="<%= search %>" class="search-input">
-        <input type="hidden" name="status" value="<%= statusFilter %>">
-        <input type="hidden" name="tier" value="<%= tierFilter %>">
-        <input type="hidden" name="duplicates" value="<%= duplicatesFilter %>">
-        <input type="hidden" name="sort" value="<%= sortBy %>">
-        <input type="hidden" name="dir" value="<%= sortDir %>">
-        <button type="submit" class="btn btn-primary btn-sm">Search</button>
-        <% if (search || statusFilter || tierFilter || duplicatesFilter) { %>
-            <a href="/customers<%= customersQuery({ search: '', status: '', tier: '', duplicates: '' }) %>" class="btn btn-secondary btn-sm">Clear</a>
-        <% } %>
-    </form>
-    <div class="filter-group">
-        <span class="filter-label">Status:</span>
-        <a href="/customers<%= customersQuery({ status: 'Active' }) %>" class="filter-pill <%= statusFilter === 'Active' ? 'active' : '' %>">Active</a>
-        <a href="/customers<%= customersQuery({ status: 'Inactive' }) %>" class="filter-pill <%= statusFilter === 'Inactive' ? 'active' : '' %>">Inactive</a>
-        <a href="/customers<%= customersQuery({ status: 'Suspended' }) %>" class="filter-pill <%= statusFilter === 'Suspended' ? 'active' : '' %>">Suspended</a>
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" action="/customers" id="customerFiltersForm" class="customer-filter-form">
+            <input type="hidden" name="sort" value="<%= sortBy %>">
+            <input type="hidden" name="dir" value="<%= sortDir %>">
+            <div class="customer-filter-grid">
+                <div class="form-group">
+                    <label for="customerSearch">Search</label>
+                    <input id="customerSearch" type="text" name="search" placeholder="Name, company, email, tags..." value="<%= filterValues.search || '' %>" class="form-control form-control-sm">
+                </div>
+                <div class="form-group">
+                    <label for="filterContactName">Contact</label>
+                    <input id="filterContactName" type="text" name="contact_name" value="<%= filterValues.contact_name || '' %>" class="form-control form-control-sm">
+                </div>
+                <div class="form-group">
+                    <label for="filterCompany">Company</label>
+                    <input id="filterCompany" type="text" name="company" value="<%= filterValues.company || '' %>" class="form-control form-control-sm">
+                </div>
+                <div class="form-group">
+                    <label for="filterEmail">Email</label>
+                    <input id="filterEmail" type="text" name="email" value="<%= filterValues.email || '' %>" class="form-control form-control-sm">
+                </div>
+                <div class="form-group">
+                    <label for="filterProducts">Products</label>
+                    <select id="filterProducts" name="products" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% metadata.products.forEach(function(product) { %>
+                            <option value="<%= product %>" <%= filterValues.products === product ? 'selected' : '' %>><%= product %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterMarkets">Markets</label>
+                    <select id="filterMarkets" name="markets" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% metadata.markets.forEach(function(market) { %>
+                            <option value="<%= market %>" <%= filterValues.markets === market ? 'selected' : '' %>><%= market %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterContentTypes">Content Types</label>
+                    <select id="filterContentTypes" name="content_types" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% metadata.content_types.forEach(function(ct) { %>
+                            <option value="<%= ct %>" <%= filterValues.content_types === ct ? 'selected' : '' %>><%= ct %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterRegions">Regions</label>
+                    <select id="filterRegions" name="regions" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% metadata.regions.forEach(function(region) { %>
+                            <option value="<%= region %>" <%= filterValues.regions === region ? 'selected' : '' %>><%= region %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterCustomerType">Customer Type</label>
+                    <select id="filterCustomerType" name="customer_type" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% ['Internal', 'OEM', 'Dealer', 'Distributor', 'End User'].forEach(function(type) { %>
+                            <option value="<%= type %>" <%= filterValues.customer_type === type ? 'selected' : '' %>><%= type %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterTier">Tier</label>
+                    <select id="filterTier" name="tier" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% ['Essential', 'Standard', 'All Announcements'].forEach(function(tier) { %>
+                            <option value="<%= tier %>" <%= filterValues.tier === tier ? 'selected' : '' %>><%= tier %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterStatus">Status</label>
+                    <select id="filterStatus" name="status" class="form-select form-select-sm">
+                        <option value="">Any</option>
+                        <% ['Active', 'Inactive', 'Suspended'].forEach(function(status) { %>
+                            <option value="<%= status %>" <%= filterValues.status === status ? 'selected' : '' %>><%= status %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filterDateAdded">Date Added</label>
+                    <input id="filterDateAdded" type="date" name="date_added" value="<%= filterValues.date_added || '' %>" class="form-control form-control-sm">
+                </div>
+                <div class="customer-filter-actions">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> Apply Filters</button>
+                    <a href="/customers?clearFilters=1" id="clearCustomerFilters" class="btn btn-secondary btn-sm"><i class="bi bi-x-circle"></i> Clear All</a>
+                    <a href="/customers<%= customersQuery({ duplicates: duplicatesFilter ? '' : '1' }) %>" class="btn btn-secondary btn-sm"><i class="bi bi-intersect"></i> <%= duplicatesFilter ? 'All Customers' : 'Potential Duplicates' %></a>
+                </div>
+            </div>
+        </form>
     </div>
 </div>
+
+<% const chips = activeFilterChips(); %>
+<% if (chips.length) { %>
+<div class="filter-summary">
+    <span class="filter-summary-label">Active filters:</span>
+    <% chips.forEach(function(item) { %>
+        <span class="filter-summary-chip"><strong><%= item.label %>:</strong> <%= item.value %></span>
+    <% }); %>
+    <a href="/customers?clearFilters=1" class="filter-summary-clear" id="clearCustomerFiltersSummary">Clear all</a>
+</div>
+<% } %>
 
 <% if (customers.length > 0) { %>
 <div id="customerBulkBar" class="bulk-actions-bar" style="display:none;">
     <span><span id="customerSelectedCount">0</span> selected</span>
+    <button type="button" class="btn btn-primary btn-sm" onclick="openBulkEditCustomers()"><i class="bi bi-pencil-square"></i> Bulk Edit Selected</button>
     <button type="button" class="btn btn-sm" onclick="bulkDeleteCustomers()" style="background: var(--danger); color: #fff;"><i class="bi bi-trash"></i> Delete Selected</button>
     <button type="button" class="btn btn-secondary btn-sm" onclick="clearCustomerSelection()"><i class="bi bi-x-circle"></i> Clear</button>
 </div>
@@ -109,22 +226,38 @@ function formatDate(value) {
 
 <div class="card">
     <div class="card-body" style="padding: 0;">
-        <div class="table-container">
-            <table>
+        <div class="table-container customer-table-container">
+            <table class="customer-table">
+                <colgroup>
+                    <col class="customer-col-select">
+                    <col class="customer-col-added">
+                    <col class="customer-col-actions">
+                    <col class="customer-col-contact">
+                    <col class="customer-col-company">
+                    <col class="customer-col-email">
+                    <col class="customer-col-products">
+                    <col class="customer-col-markets">
+                    <col class="customer-col-content">
+                    <col class="customer-col-regions">
+                    <col class="customer-col-tier">
+                    <col class="customer-col-status">
+                    <col class="customer-col-type">
+                </colgroup>
                 <thead>
                     <tr>
                         <th style="width: 36px;"></th>
+                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'date_added', dir: nextSortDir('date_added') }) %>">Added<%= sortArrow('date_added') %></a></th>
+                        <th>Actions</th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'contact_name', dir: nextSortDir('contact_name') }) %>">Contact Name<%= sortArrow('contact_name') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'company', dir: nextSortDir('company') }) %>">Company<%= sortArrow('company') %></a></th>
-                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'customer_id', dir: nextSortDir('customer_id') }) %>">Customer ID<%= sortArrow('customer_id') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'email', dir: nextSortDir('email') }) %>">Email<%= sortArrow('email') %></a></th>
                         <th>Products</th>
                         <th>Markets</th>
+                        <th>Content Types</th>
+                        <th>Regions</th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'subscription_tier', dir: nextSortDir('subscription_tier') }) %>">Tier<%= sortArrow('subscription_tier') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'status', dir: nextSortDir('status') }) %>">Status<%= sortArrow('status') %></a></th>
                         <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'customer_type', dir: nextSortDir('customer_type') }) %>">Type<%= sortArrow('customer_type') %></a></th>
-                        <th><a class="sort-link" href="/customers<%= customersQuery({ sort: 'date_added', dir: nextSortDir('date_added') }) %>">Added<%= sortArrow('date_added') %></a></th>
-                        <th style="width: 120px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -132,41 +265,53 @@ function formatDate(value) {
                     <% const isInternal = (customer.customer_type || '').toLowerCase() === 'internal'; %>
                     <tr>
                         <td><input type="checkbox" class="customer-checkbox" value="<%= customer.id %>"></td>
-                        <td>
+                        <td class="date-cell"><%= formatDate(customer.date_added) %></td>
+                        <td class="actions customer-row-actions">
+                            <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm btn-icon" data-bs-toggle="tooltip" title="Edit customer"><i class="bi bi-pencil"></i></a>
+                            <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">
+                                <button type="submit" class="btn btn-danger btn-sm btn-icon" data-bs-toggle="tooltip" title="Delete customer"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </td>
+                        <td class="customer-name-cell">
                             <strong><%= customer.contact_name %></strong>
                             <% if (isInternal) { %>
                                 <span class="badge badge-internal" style="margin-left: 6px;">Internal</span>
                             <% } %>
                         </td>
-                        <td><%= customer.company %></td>
-                        <td>
-                            <% if (customer.customer_id) { %>
-                                <%= customer.customer_id %>
-                            <% } else if (isInternal) { %>
-                                <span class="badge badge-internal">Internal Employee</span>
-                            <% } else { %>
-                                <span class="text-muted">None</span>
-                            <% } %>
-                        </td>
-                        <td><%= customer.email %></td>
-                        <td class="tag-cell">
+                        <td class="company-cell"><%= customer.company %></td>
+                        <td class="email-cell"><%= customer.email %></td>
+                        <td class="tag-cell list-cell">
                             <% if (customer.products) { %>
-                                <% var prods = customer.products.split('; '); prods.slice(0, 2).forEach(function(p) { %>
+                                <% var prods = customer.products.split(';').map(function(p) { return p.trim(); }).filter(Boolean); prods.forEach(function(p) { %>
                                     <span class="tag"><%= p %></span>
-                                <% }); if (prods.length > 2) { %>
-                                    <span class="tag tag-more">+<%= prods.length - 2 %></span>
-                                <% } %>
+                                <% }); %>
                             <% } else { %>
                                 <span class="text-muted">None</span>
                             <% } %>
                         </td>
-                        <td class="tag-cell">
+                        <td class="tag-cell list-cell">
                             <% if (customer.markets) { %>
-                                <% var mkts = customer.markets.split('; '); mkts.slice(0, 2).forEach(function(m) { %>
+                                <% var mkts = customer.markets.split(';').map(function(m) { return m.trim(); }).filter(Boolean); mkts.forEach(function(m) { %>
                                     <span class="tag"><%= m %></span>
-                                <% }); if (mkts.length > 2) { %>
-                                    <span class="tag tag-more">+<%= mkts.length - 2 %></span>
-                                <% } %>
+                                <% }); %>
+                            <% } else { %>
+                                <span class="text-muted">None</span>
+                            <% } %>
+                        </td>
+                        <td class="tag-cell list-cell">
+                            <% if (customer.content_types) { %>
+                                <% var contentTypes = customer.content_types.split(';').map(function(ct) { return ct.trim(); }).filter(Boolean); contentTypes.forEach(function(ct) { %>
+                                    <span class="tag"><%= ct %></span>
+                                <% }); %>
+                            <% } else { %>
+                                <span class="text-muted">None</span>
+                            <% } %>
+                        </td>
+                        <td class="tag-cell list-cell">
+                            <% if (customer.regions) { %>
+                                <% var regions = customer.regions.split(';').map(function(region) { return region.trim(); }).filter(Boolean); regions.forEach(function(region) { %>
+                                    <span class="tag"><%= region %></span>
+                                <% }); %>
                             <% } else { %>
                                 <span class="text-muted">None</span>
                             <% } %>
@@ -180,17 +325,100 @@ function formatDate(value) {
                                 <%= customer.customer_type || '-' %>
                             <% } %>
                         </td>
-                        <td><%= formatDate(customer.date_added) %></td>
-                        <td class="actions">
-                            <a href="/customers/<%= customer.id %>/edit" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" title="Edit customer"><i class="bi bi-pencil"></i> Edit</a>
-                            <form action="/customers/<%= customer.id %>/delete" method="POST" style="display: inline;" onsubmit="return confirm('Delete this customer? This cannot be undone.')">
-                                <button type="submit" class="btn btn-danger btn-sm" data-bs-toggle="tooltip" title="Delete customer"><i class="bi bi-trash"></i></button>
-                            </form>
-                        </td>
                     </tr>
                     <% }); %>
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="bulkEditCustomersModal" tabindex="-1" aria-labelledby="bulkEditCustomersLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkEditCustomersLabel">Bulk Edit Customers</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="bulk-edit-grid mb-3">
+                    <div class="form-group">
+                        <label for="bulkCustomerType">Customer Type</label>
+                        <select id="bulkCustomerType" class="form-select form-select-sm" data-bulk-field="customer_type">
+                            <option value="">No change</option>
+                            <% ['Internal', 'OEM', 'Dealer', 'Distributor', 'End User'].forEach(function(type) { %>
+                                <option value="<%= type %>"><%= type %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bulkSubscriptionTier">Subscription Tier</label>
+                        <select id="bulkSubscriptionTier" class="form-select form-select-sm" data-bulk-field="subscription_tier">
+                            <option value="">No change</option>
+                            <% ['Essential', 'Standard', 'All Announcements'].forEach(function(tier) { %>
+                                <option value="<%= tier %>"><%= tier %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bulkPreferredFrequency">Preferred Frequency</label>
+                        <select id="bulkPreferredFrequency" class="form-select form-select-sm" data-bulk-field="preferred_frequency">
+                            <option value="">No change</option>
+                            <% ['Immediate', 'Daily Digest', 'Weekly Digest'].forEach(function(freq) { %>
+                                <option value="<%= freq %>"><%= freq %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="bulkStatus">Status</label>
+                        <select id="bulkStatus" class="form-select form-select-sm" data-bulk-field="status">
+                            <option value="">No change</option>
+                            <% ['Active', 'Inactive', 'Suspended'].forEach(function(status) { %>
+                                <option value="<%= status %>"><%= status %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="bulk-edit-grid">
+                    <div class="bulk-edit-list">
+                        <label><input type="checkbox" class="bulk-list-enable" data-target="bulkProducts"> Replace Products</label>
+                        <select id="bulkProducts" class="bulk-list-select" data-bulk-list-field="products" multiple disabled>
+                            <% metadata.products.forEach(function(product) { %>
+                                <option value="<%= product %>"><%= product %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="bulk-edit-list">
+                        <label><input type="checkbox" class="bulk-list-enable" data-target="bulkMarkets"> Replace Markets</label>
+                        <select id="bulkMarkets" class="bulk-list-select" data-bulk-list-field="markets" multiple disabled>
+                            <% metadata.markets.forEach(function(market) { %>
+                                <option value="<%= market %>"><%= market %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="bulk-edit-list">
+                        <label><input type="checkbox" class="bulk-list-enable" data-target="bulkContentTypes"> Replace Content Types</label>
+                        <select id="bulkContentTypes" class="bulk-list-select" data-bulk-list-field="content_types" multiple disabled>
+                            <% metadata.content_types.forEach(function(ct) { %>
+                                <option value="<%= ct %>"><%= ct %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="bulk-edit-list">
+                        <label><input type="checkbox" class="bulk-list-enable" data-target="bulkRegions"> Replace Regions</label>
+                        <select id="bulkRegions" class="bulk-list-select" data-bulk-list-field="regions" multiple disabled>
+                            <% metadata.regions.forEach(function(region) { %>
+                                <option value="<%= region %>"><%= region %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="bulkEditCustomers()"><i class="bi bi-check2"></i> Apply Changes</button>
+            </div>
         </div>
     </div>
 </div>
@@ -200,9 +428,9 @@ function formatDate(value) {
         <div class="empty-state">
             <div class="empty-state-icon"><i class="bi bi-people"></i></div>
             <h3>No customers found</h3>
-            <% if (search || statusFilter || tierFilter) { %>
+            <% if (chips.length) { %>
                 <p>No customers match your search criteria. Try adjusting your filters.</p>
-                <a href="/customers" class="btn btn-secondary">Clear Filters</a>
+                <a href="/customers?clearFilters=1" class="btn btn-secondary">Clear Filters</a>
             <% } else { %>
                 <p>Get started by adding your first customer profile.</p>
                 <a href="/customers/new" class="btn btn-primary">Add Customer</a>
@@ -222,6 +450,46 @@ if (toast) {
 }
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) { new bootstrap.Tooltip(el); });
 
+(function() {
+    var storageKey = 'psiCustomerFilters';
+    var filterParamNames = ['search', 'contact_name', 'company', 'email', 'products', 'markets', 'content_types', 'regions', 'customer_type', 'status', 'tier', 'date_added', 'duplicates', 'sort', 'dir'];
+    var params = new URLSearchParams(window.location.search);
+
+    if (params.get('clearFilters') === '1') {
+        try { sessionStorage.removeItem(storageKey); } catch (err) {}
+        window.history.replaceState(null, '', '/customers');
+        return;
+    }
+
+    var storedParams = new URLSearchParams();
+    filterParamNames.forEach(function(name) {
+        var value = params.get(name);
+        if (value) storedParams.set(name, value);
+    });
+    var hasCurrentFilters = Array.from(storedParams.keys()).length > 0;
+
+    if (hasCurrentFilters) {
+        try { sessionStorage.setItem(storageKey, storedParams.toString()); } catch (err) {}
+    } else {
+        var stored = '';
+        try { stored = sessionStorage.getItem(storageKey) || ''; } catch (err) {}
+        if (stored) {
+            var next = new URLSearchParams(stored);
+            ['success', 'error'].forEach(function(name) {
+                if (params.get(name)) next.set(name, params.get(name));
+            });
+            window.location.replace('/customers?' + next.toString());
+            return;
+        }
+    }
+
+    document.querySelectorAll('a[href="/customers?clearFilters=1"]').forEach(function(link) {
+        link.addEventListener('click', function() {
+            try { sessionStorage.removeItem(storageKey); } catch (err) {}
+        });
+    });
+})();
+
 var customerImportInput = document.getElementById('customerImportInput');
 if (customerImportInput) {
     customerImportInput.addEventListener('change', function() {
@@ -235,6 +503,8 @@ var customerBulkBar = document.getElementById('customerBulkBar');
 var customerBulkHint = document.getElementById('customerBulkHint');
 var customerSelectedCount = document.getElementById('customerSelectedCount');
 var customerSelectAll = document.getElementById('selectAllCustomers');
+var bulkEditCustomersModalEl = document.getElementById('bulkEditCustomersModal');
+var bulkEditCustomersModal = bulkEditCustomersModalEl ? new bootstrap.Modal(bulkEditCustomersModalEl) : null;
 
 function getCheckedCustomers() {
     return Array.from(document.querySelectorAll('.customer-checkbox:checked'));
@@ -265,6 +535,70 @@ function clearCustomerSelection() {
         customerSelectAll.indeterminate = false;
     }
     updateCustomerSelectionUi();
+}
+
+function resetBulkEditCustomersForm() {
+    if (!bulkEditCustomersModalEl) return;
+    bulkEditCustomersModalEl.querySelectorAll('[data-bulk-field]').forEach(function(select) {
+        select.value = '';
+    });
+    bulkEditCustomersModalEl.querySelectorAll('.bulk-list-enable').forEach(function(cb) {
+        cb.checked = false;
+        var target = document.getElementById(cb.dataset.target);
+        if (target) {
+            target.disabled = true;
+            Array.from(target.options).forEach(function(option) { option.selected = false; });
+        }
+    });
+}
+
+function openBulkEditCustomers() {
+    var ids = getCheckedCustomers();
+    if (!ids.length || !bulkEditCustomersModal) return;
+    resetBulkEditCustomersForm();
+    bulkEditCustomersModal.show();
+}
+
+function selectedOptionValues(select) {
+    return Array.from(select.selectedOptions || []).map(function(option) { return option.value; }).filter(Boolean);
+}
+
+function bulkEditCustomers() {
+    var ids = getCheckedCustomers().map(function(cb) { return parseInt(cb.value, 10); }).filter(function(v) { return Number.isInteger(v); });
+    if (!ids.length || !bulkEditCustomersModalEl) return;
+
+    var updates = {};
+    bulkEditCustomersModalEl.querySelectorAll('[data-bulk-field]').forEach(function(select) {
+        if (select.value) updates[select.dataset.bulkField] = select.value;
+    });
+    bulkEditCustomersModalEl.querySelectorAll('.bulk-list-enable:checked').forEach(function(cb) {
+        var target = document.getElementById(cb.dataset.target);
+        if (target) {
+            updates[target.dataset.bulkListField] = selectedOptionValues(target);
+        }
+    });
+
+    if (!Object.keys(updates).length) {
+        alert('Choose at least one field to update.');
+        return;
+    }
+    if (!confirm('Apply these changes to ' + ids.length + ' selected customer record(s)?')) return;
+
+    fetch('/customers/update-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: ids, updates: updates })
+    }).then(function(res) { return res.json(); })
+      .then(function(data) {
+          if (data.success) {
+              location.href = '/customers?success=' + encodeURIComponent('Updated ' + data.count + ' customer record(s)');
+          } else {
+              location.href = '/customers?error=' + encodeURIComponent(data.error || 'Bulk update failed');
+          }
+      })
+      .catch(function() {
+          location.href = '/customers?error=' + encodeURIComponent('Bulk update failed');
+      });
 }
 
 function bulkDeleteCustomers() {
@@ -303,6 +637,10 @@ if (customerSelectAll) {
 document.addEventListener('change', function(e) {
     if (e.target.classList.contains('customer-checkbox')) {
         updateCustomerSelectionUi();
+    }
+    if (e.target.classList.contains('bulk-list-enable')) {
+        var target = document.getElementById(e.target.dataset.target);
+        if (target) target.disabled = !e.target.checked;
     }
 });
 

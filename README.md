@@ -86,13 +86,27 @@ Currently, emails are logged to console for testing.
 
 ## Production Data Retention
 
-- On Render, production data is stored under the persistent `/data` disk:
-  - `/data/publications.db` for customers, publications, logs, and distribution jobs
-  - `/data/uploads` for publication files and import sessions
-  - `/data/exports` for generated log archives
-- Keep the same Render service and disk attached during revisions. Recreating the service or disk will create a new empty data volume.
+The application uses SQLite. In local development, `publications.db`, `uploads/`, and `exports/` live in the project folder. In production on Render, the app is configured to use the attached persistent disk at `/data`.
+
+Production stores:
+
+- `/data/publications.db`: customers, publications, distribution logs, distribution jobs, metadata, and session records.
+- `/data/uploads`: uploaded publication documents and customer import session files.
+- `/data/exports`: generated distribution-log archive spreadsheets.
+
+Deployment and migration policy:
+
+- Keep the same Render service and persistent disk attached during revisions. Recreating the service or disk starts with a new empty data volume.
+- Startup migrations are additive only: tables are created with `CREATE TABLE IF NOT EXISTS`, columns are added with guarded `ALTER TABLE ... ADD COLUMN`, and indexes are created with `CREATE INDEX IF NOT EXISTS`.
+- Do not ship destructive schema migrations without first copying `/data/publications.db`.
 - Set `SESSION_SECRET` in production so admin sessions survive deploys/restarts.
-- Before schema-changing deploys, take a copy or snapshot of `/data/publications.db`.
+- The app does not currently create its own automated database backups. Backups should be handled by Render disk snapshots or a scheduled copy of `/data/publications.db` before releases and at the business cadence PSI chooses.
+
+Distribution log retention:
+
+- Distribution events are appended to `distribution_logs`; manual and bulk resends create new log rows.
+- Logs can be archived and restored in the UI, but hard delete is disabled so the audit trail remains retained in the database.
+- `LOG_ARCHIVE_DAYS` controls when old active log rows are moved to the archived view. The default production value is 180 days. Archiving does not delete the rows.
 - Distribution sends are queued in the database and processed in controlled batches using `EMAIL_SEND_CONCURRENCY` and `EMAIL_SEND_BATCH_DELAY_MS`.
 
 ## Matching Logic
